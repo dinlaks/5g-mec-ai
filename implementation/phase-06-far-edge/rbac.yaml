@@ -1,0 +1,97 @@
+---
+# Phase 06 — Far Edge RBAC
+# ServiceAccounts + RoleBindings for all far-edge components.
+# Applied to SNO far-edge nodes via ACM ApplicationSet.
+# SCC: restricted-v2 (SNO enforces standard OpenShift restricted-v2 SCC)
+
+# ── ServiceAccounts ────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: telemetry-collector-sa
+  namespace: far-edge-mec
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: demand-predictor-sa
+  namespace: far-edge-mec
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cache-manager-sa
+  namespace: far-edge-mec
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: eda-receiver-sa
+  namespace: far-edge-mec
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+
+# ── ConfigMap reader role (eda-receiver needs to read abr-policy ConfigMap) ────
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: configmap-reader
+  namespace: far-edge-mec
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: eda-receiver-configmap-reader
+  namespace: far-edge-mec
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: configmap-reader
+subjects:
+  - kind: ServiceAccount
+    name: eda-receiver-sa
+    namespace: far-edge-mec
+
+# ── Image puller RoleBindings ──────────────────────────────────────────────────
+# Needed for custom images pulled from internal registry or external registries
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: far-edge-image-pullers
+  namespace: far-edge-mec
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:image-puller
+subjects:
+  - kind: ServiceAccount
+    name: telemetry-collector-sa
+    namespace: far-edge-mec
+  - kind: ServiceAccount
+    name: demand-predictor-sa
+    namespace: far-edge-mec
+  - kind: ServiceAccount
+    name: cache-manager-sa
+    namespace: far-edge-mec
+  - kind: ServiceAccount
+    name: eda-receiver-sa
+    namespace: far-edge-mec

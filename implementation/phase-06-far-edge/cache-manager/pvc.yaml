@@ -1,0 +1,24 @@
+---
+# Cache Manager — PersistentVolumeClaim
+# Namespace: far-edge-mec (SNO far-edge node)
+# Stores pre-fetched video segments pulled by AAP prefetch-content.yml playbook
+#
+# Demo size: 20Gi — sufficient for mock video segments (Big Buck Bunny HLS, cdn-mock content)
+# Production note: increase to 400Gi–1Ti per MEC node to hold full content libraries
+#                  across multiple concurrent events (NFL + concert + VOD premiere).
+#                  Physical MEC nodes use NVMe SSD — replace EBS with local NVMe StorageClass.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mec-cache-pvc
+  namespace: far-edge-mec
+  labels:
+    app.kubernetes.io/name: cache-manager
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3-csi      # AWS EBS gp3 for demo — production: NVMe local StorageClass
+  resources:
+    requests:
+      storage: 20Gi

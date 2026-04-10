@@ -1,0 +1,30 @@
+---
+# AAP Platform — AnsibleAutomationPlatform CR
+# Namespace: aap
+# This is the top-level CR that installs the full AAP 2.5 platform
+# It manages: AutomationController + EDAController + Hub (if enabled)
+# Operator must be installed first (Phase 01 wave-1)
+apiVersion: aap.ansible.com/v1alpha1
+kind: AnsibleAutomationPlatform
+metadata:
+  name: aap
+  namespace: aap
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  # AutomationController — AWX-based playbook execution engine
+  controller:
+    disabled: false
+    name: controller
+    replicas: 1
+    admin_user: admin
+    admin_password_secret: aap-admin-secret
+
+  # EDA Controller — Event-Driven Ansible (Kafka → playbook trigger)
+  eda:
+    disabled: false
+    name: eda-controller
+
+  # Hub disabled — not needed for this use case
+  hub:
+    disabled: true

@@ -1,0 +1,84 @@
+---
+# Redis — Langfuse Queue Backend
+# Namespace: mec-ai-obs
+# Role: async trace ingestion queue — Langfuse writes traces to Redis,
+#       worker processes flush to ClickHouse in batches
+# SCC: restricted-v2 — image runs as UID 1001 (redis) by default
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: mec-ai-obs
+  labels:
+    app: redis
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      serviceAccountName: redis-sa
+
+      # ── Pod-level security (restricted-v2 SCC) ────────────────────────────
+      # registry.redhat.io/rhel9/redis-7 runs as UID 1001 (non-root) by default
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: redis
+          image: registry.redhat.io/rhel9/redis-7:latest
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 100m
+            limits:
+              memory: 1Gi
+              cpu: 500m
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 15
+            periodSeconds: 10
+
+          # ── Container-level security (restricted-v2 SCC) ──────────────────
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: mec-ai-obs
+  labels:
+    app: redis
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379

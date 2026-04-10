@@ -1,0 +1,171 @@
+---
+# Kafka Topics — 5G MEC Content Intelligence
+# All 8 topics for the full data flow between far edge and near edge
+# Namespace: mec-ai-data
+# Note: KafkaTopic CR name must be DNS-compatible (hyphens, lowercase)
+#       spec.topicName is the actual Kafka topic name (dots allowed)
+
+# ── FAR EDGE TELEMETRY TOPICS ─────────────────────────────────
+
+# Topic 1: Raw content request stream from UPF (per cell sector)
+# Producer: Far Edge Telemetry Collector
+# Consumer: Far Edge Demand Detection (LSTM model)
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: content-requests-live
+  namespace: mec-ai-data
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    tier: far-edge-telemetry
+spec:
+  topicName: content.requests.live
+  partitions: 6       # 1 per MEC site (scale up as sites added)
+  replicas: 3
+  config:
+    retention.ms: "1800000"       # 30 min — real-time signal, short lived
+    cleanup.policy: delete
+    compression.type: lz4
+---
+# Topic 2: UE density per sector from far edge
+# Producer: Far Edge Telemetry Collector
+# Consumer: Far Edge Demand Detection (LSTM model)
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: ue-density-live
+  namespace: mec-ai-data
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    tier: far-edge-telemetry
+spec:
+  topicName: ue.density.live
+  partitions: 6
+  replicas: 3
+  config:
+    retention.ms: "1800000"
+    cleanup.policy: delete
+    compression.type: lz4
+---
+# Topic 3: Network capacity per sector (PRB utilization, throughput)
+# Producer: Far Edge Telemetry Collector
+# Consumer: Near Edge mcp-kafka, EdgeStream IQ backend
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: network-capacity-live
+  namespace: mec-ai-data
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    tier: far-edge-telemetry
+spec:
+  topicName: network.capacity.live
+  partitions: 6
+  replicas: 3
+  config:
+    retention.ms: "3600000"       # 1 hour
+    cleanup.policy: delete
+    compression.type: lz4
+---
+# Topic 4: Cache state from far-edge cache manager
+# Producer: Far Edge Cache Manager (Nginx + NVMe reporter)
+# Consumer: Near Edge mcp-kafka, EdgeStream IQ backend
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: cache-state
+  namespace: mec-ai-data
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    tier: far-edge-status
+spec:
+  topicName: cache.state
+  partitions: 6
+  replicas: 3
+  config:
+    retention.ms: "7200000"       # 2 hours
+    cleanup.policy: delete
+    compression.type: snappy
+---
+# Topic 5: QoE metrics from far-edge ABR policy engine
+# Producer: Far Edge ABR Policy Engine
+# Consumer: Near Edge mcp-kafka, EdgeStream IQ backend
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: qoe-metrics
+  namespace: mec-ai-data
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    tier: far-edge-status
+spec:
+  topicName: qoe.metrics
+  partitions: 6
+  replicas: 3
+  config:
+    retention.ms: "7200000"
+    cleanup.policy: delete
+    compression.type: snappy
+
+---
+# ── PREDICTION & DECISION TOPICS ──────────────────────────────
+
+# Topic 6: Demand predictions from far-edge LSTM model
+# Producer: Far Edge Demand Detection (KServe LSTM)
+# Consumer: Near Edge agent (demand_reader_node) + EDA + EdgeStream IQ
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: demand-predictions
+  namespace: mec-ai-data
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    tier: prediction
+spec:
+  topicName: demand.predictions
+  partitions: 6
+  replicas: 3
+  config:
+    retention.ms: "3600000"       # 1 hour — agent must act within the window
+    cleanup.policy: delete
+    compression.type: snappy
+---
+# Topic 7: Agent decisions (actions taken by near-edge LangGraph agent)
+# Producer: Near Edge aap_executor_node
+# Consumer: Near Edge EDA (triggers AAP), EdgeStream IQ backend
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: agent-decisions
+  namespace: mec-ai-data
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    tier: decision
+spec:
+  topicName: agent.decisions
+  partitions: 3
+  replicas: 3
+  config:
+    retention.ms: "86400000"      # 24 hours — audit trail
+    cleanup.policy: delete
+    compression.type: snappy
+---
+# Topic 8: Remediation outcomes (post-action QoE results)
+# Producer: Near Edge outcome_verifier_node
+# Consumer: Near Edge kubeflow_trigger_node, EdgeStream IQ backend
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: remediation-outcomes
+  namespace: mec-ai-data
+  labels:
+    strimzi.io/cluster: kafka-cluster
+    tier: outcome
+spec:
+  topicName: remediation.outcomes
+  partitions: 3
+  replicas: 3
+  config:
+    retention.ms: "604800000"     # 7 days — used for Kubeflow retraining input
+    cleanup.policy: delete
+    compression.type: snappy

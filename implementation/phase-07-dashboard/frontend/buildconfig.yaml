@@ -1,0 +1,35 @@
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: edgestream-iq-frontend
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: edgestream-iq-frontend
+    app.kubernetes.io/part-of: mec-content-ai
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: edgestream-iq-frontend
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: edgestream-iq-frontend
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  source:
+    type: Git
+    git:
+      uri: "${GIT_REPO_URL}"
+      ref: main
+    contextDir: implementation/phase-07-dashboard/frontend
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: edgestream-iq-frontend:latest
+  triggers:
+    - type: ConfigChange

@@ -1,0 +1,29 @@
+---
+# Wave 1 — Red Hat AMQ Streams (Kafka) 3.1 Operator
+# Installs the Strimzi-based AMQ Streams operator (KRaft mode, no ZooKeeper)
+# Manages Kafka cluster in mec-ai-data namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: amq-streams
+  labels:
+    openshift.io/cluster-monitoring: "true"
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: amq-streams
+  namespace: amq-streams
+spec: {}   # watches all namespaces — needed to manage Kafka in mec-ai-data
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: amq-streams
+  namespace: amq-streams
+spec:
+  channel: stable
+  installPlanApproval: Automatic
+  name: amq-streams
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace

@@ -1,0 +1,38 @@
+---
+# ArgoCD Application — Data Pipeline (near-edge)
+# Manages: AMQ Streams Kafka cluster + topics, MinIO, Langfuse
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mec-data-pipeline
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+    tier: data
+spec:
+  project: mec-content-ai
+  source:
+    repoURL: https://github.com/<YOUR_ORG>/5g-mec-ai.git
+    targetRevision: main
+    path: implementation/phase-02-data-pipeline
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: mec-ai-data
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

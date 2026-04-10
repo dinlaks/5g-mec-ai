@@ -1,0 +1,37 @@
+---
+# KServe InferenceService — ABR Policy Engine
+# Namespace: far-edge-mec (SNO far-edge node, CPU only)
+# Called by: Nginx Cache Manager (proxy_pass on every video segment request)
+# Input:  subscriber_id, signal_strength_dbm, subscriber_tier, timestamp
+# Output: quality tier (4K / 1080p / 720p / 360p)
+#
+# Config hot-reload: abr-policy-config ConfigMap is mounted at /etc/mec/abr-policy.yaml
+# inotify watcher in the ABR server detects changes and reloads atomically.
+# When AAP push-abr-policy.yml runs, it updates this ConfigMap →
+# Kubernetes propagates to volume mount → inotify fires → config reloaded.
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: abr-policy-engine
+  namespace: far-edge-mec
+  labels:
+    app.kubernetes.io/name: abr-policy-engine
+    app.kubernetes.io/part-of: mec-content-ai
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment
+spec:
+  predictor:
+    model:
+      modelFormat:
+        name: abr-policy
+        version: "1"
+      runtime: abr-runtime
+      # No model file needed — policy logic is in the runtime code
+      # storageUri intentionally omitted
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 256Mi

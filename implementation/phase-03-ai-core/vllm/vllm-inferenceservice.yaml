@@ -1,0 +1,39 @@
+---
+# vLLM InferenceService — Rendered
+# Model: Llama 3.1 8B Instruct (quantized AWQ)
+# Namespace: redhat-ods-applications
+# Update GPU_NODE_LABEL value to match your actual GPU node label
+# Generated from: vllm-inferenceservice.tmpl.yaml
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: llama-3-1-8b-instruct
+  namespace: redhat-ods-applications
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+  annotations:
+    serving.knative.openshift.io/enablePassthrough: "true"
+    sidecar.istio.io/inject: "true"
+    sidecar.istio.io/rewriteAppHTTPProbers: "true"
+spec:
+  predictor:
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+    nodeSelector:
+      nvidia.com/gpu.present: "true"     # update if your GPU node uses a different label
+    model:
+      modelFormat:
+        name: vLLM
+      runtime: vllm-runtime-mec
+      storageUri: "s3://mec-models/llama-3-1-8b-instruct"
+      resources:
+        requests:
+          cpu: "4"
+          memory: 16Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "8"
+          memory: 32Gi
+          nvidia.com/gpu: "1"

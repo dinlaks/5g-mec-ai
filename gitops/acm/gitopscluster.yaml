@@ -1,0 +1,34 @@
+---
+# GitOpsCluster — near-edge
+# Links ACM Placement → ArgoCD instance
+# ACM automatically registers selected clusters as ArgoCD destinations
+apiVersion: apps.open-cluster-management.io/v1beta1
+kind: GitOpsCluster
+metadata:
+  name: mec-gitops-near-edge
+  namespace: openshift-gitops
+spec:
+  argoServer:
+    cluster: local-cluster        # ArgoCD runs on the near-edge hub
+    argoNamespace: openshift-gitops
+  placementRef:
+    kind: Placement
+    apiGroup: cluster.open-cluster-management.io
+    name: placement-near-edge
+---
+# GitOpsCluster — far-edge
+# ACM registers every matched far-edge MEC cluster as an ArgoCD destination
+# ApplicationSet then deploys workloads to all of them
+apiVersion: apps.open-cluster-management.io/v1beta1
+kind: GitOpsCluster
+metadata:
+  name: mec-gitops-far-edge
+  namespace: openshift-gitops
+spec:
+  argoServer:
+    cluster: local-cluster
+    argoNamespace: openshift-gitops
+  placementRef:
+    kind: Placement
+    apiGroup: cluster.open-cluster-management.io
+    name: placement-far-edge-mec

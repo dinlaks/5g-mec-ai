@@ -1,0 +1,149 @@
+---
+# ContentIntelligenceAgent — Deployment
+# Namespace: mec-content-ai
+# SCC: restricted-v2 (OpenShift 4.21 default — no root, no privilege escalation)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: content-intelligence-agent
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: content-intelligence-agent
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: content-intelligence-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: content-intelligence-agent
+        app.kubernetes.io/part-of: mec-content-ai
+    spec:
+      serviceAccountName: content-intelligence-agent-sa
+
+      # ── Pod-level security (restricted-v2 SCC) ────────────────────────────
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: agent
+          image: image-registry.openshift-image-registry.svc:5000/mec-content-ai/content-intelligence-agent:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+
+          # ── Container-level security (restricted-v2 SCC) ──────────────────
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+
+          env:
+            - name: KAFKA_BOOTSTRAP
+              value: "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092"
+            - name: LLAMASTACK_URL
+              value: "http://llamastack.mec-content-ai.svc.cluster.local:5001"
+            - name: MODEL_ID
+              value: "meta-llama/Llama-3.1-8B-Instruct"
+            - name: CONFIDENCE_THRESHOLD
+              value: "0.85"
+            - name: SLACK_OPS_CHANNEL
+              value: "#mec-ai-ops"
+            - name: AGENT_API_URL
+              value: "https://content-intelligence-agent-mec-content-ai.apps.cluster.local"
+            # Langfuse
+            - name: LANGFUSE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-api-secret
+                  key: host
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-api-secret
+                  key: public-key
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-api-secret
+                  key: secret-key
+            # Slack
+            - name: SLACK_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: slack-secret
+                  key: bot-token
+            # MCP server URLs (ClusterIP Services in same namespace)
+            - name: MCP_NETWORK_INTEL_URL
+              value: "http://mcp-network-intel:8000/mcp"
+            - name: MCP_KAFKA_URL
+              value: "http://mcp-kafka:8000/mcp"
+            - name: MCP_AAP_URL
+              value: "http://mcp-aap:8000/mcp"
+            - name: MCP_SLACK_URL
+              value: "http://mcp-slack:8000/mcp"
+            - name: MCP_KUBEFLOW_URL
+              value: "http://mcp-kubeflow:8000/mcp"
+            - name: MCP_OPENSHIFT_URL
+              value: "http://mcp-openshift:8000/mcp"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: content-intelligence-agent
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: content-intelligence-agent
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  selector:
+    app.kubernetes.io/name: content-intelligence-agent
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: content-intelligence-agent
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: content-intelligence-agent
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  to:
+    kind: Service
+    name: content-intelligence-agent
+  port:
+    targetPort: http
+  tls:
+    termination: Edge
+    insecureEdgeTerminationPolicy: Redirect

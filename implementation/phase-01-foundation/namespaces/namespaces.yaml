@@ -1,0 +1,45 @@
+---
+# Namespaces — 5G MEC Content Intelligence
+# All custom namespaces for this use case.
+# Standard operator namespaces (redhat-ods-operator, aap, etc.) are
+# created by their respective operator subscriptions in the operators/ folder.
+
+# Primary namespace — agent, MCP servers, LlamaStack, EdgeStream IQ
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mec-content-ai
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+    openshift.io/cluster-monitoring: "true"
+    # ArgoCD can deploy to this namespace
+    argocd.argoproj.io/managed-by: openshift-gitops
+---
+# Data namespace — Kafka, MinIO
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mec-ai-data
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+    openshift.io/cluster-monitoring: "true"
+    argocd.argoproj.io/managed-by: openshift-gitops
+---
+# Observability namespace — Langfuse (ClickHouse + Redis)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mec-ai-obs
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+    openshift.io/cluster-monitoring: "true"
+    argocd.argoproj.io/managed-by: openshift-gitops
+---
+# Far-edge namespace — deployed to SNO MEC nodes via ACM ApplicationSet
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: far-edge-mec
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+    argocd.argoproj.io/managed-by: openshift-gitops

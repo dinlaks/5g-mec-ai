@@ -1,0 +1,20 @@
+---
+# Cache Manager — Service
+# Exposes Nginx video cache server within the SNO cluster
+# Called by: subscriber player (via network proxy) or demo test scripts
+apiVersion: v1
+kind: Service
+metadata:
+  name: cache-manager
+  namespace: far-edge-mec
+  labels:
+    app.kubernetes.io/name: cache-manager
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  selector:
+    app.kubernetes.io/name: cache-manager
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

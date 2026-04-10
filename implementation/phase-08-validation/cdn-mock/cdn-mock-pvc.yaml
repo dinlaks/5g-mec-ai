@@ -1,0 +1,22 @@
+---
+# CDN Mock — PVC
+# Namespace: mec-content-ai (near-edge)
+# Stores Big Buck Bunny HLS segments seeded by cdn-mock-seed-job
+# Demo size: 5Gi (360p + 720p + 1080p, first 10 mins ≈ 800MB)
+# Production note: replace with real CDN peering — no PVC needed
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cdn-mock-pvc
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: cdn-mock
+    app.kubernetes.io/part-of: mec-content-ai
+    mec.component: demo
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3-csi
+  resources:
+    requests:
+      storage: 5Gi

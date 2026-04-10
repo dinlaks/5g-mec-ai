@@ -1,0 +1,45 @@
+---
+# vLLM InferenceService — TEMPLATE
+# Namespace: redhat-ods-applications
+# Variables: ${VLLM_MODEL_PATH}  — path inside mec-models bucket
+#            ${VLLM_MODEL_NAME}  — served model name (used in API calls)
+#            ${GPU_NODE_LABEL}   — node label to schedule on GPU node
+#
+# Render with:
+#   export VLLM_MODEL_PATH="llama-3-1-8b-instruct"
+#   export VLLM_MODEL_NAME="llama-3-1-8b-instruct"
+#   export GPU_NODE_LABEL="nvidia.com/gpu.present=true"
+#   envsubst < vllm-inferenceservice.tmpl.yaml > vllm-inferenceservice.yaml
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: ${VLLM_MODEL_NAME}
+  namespace: redhat-ods-applications
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+  annotations:
+    serving.knative.openshift.io/enablePassthrough: "true"
+    sidecar.istio.io/inject: "true"
+    sidecar.istio.io/rewriteAppHTTPProbers: "true"
+spec:
+  predictor:
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+    nodeSelector:
+      ${GPU_NODE_LABEL}
+    model:
+      modelFormat:
+        name: vLLM
+      runtime: vllm-runtime-mec
+      storageUri: "s3://mec-models/${VLLM_MODEL_PATH}"
+      resources:
+        requests:
+          cpu: "4"
+          memory: 16Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "8"
+          memory: 32Gi
+          nvidia.com/gpu: "1"

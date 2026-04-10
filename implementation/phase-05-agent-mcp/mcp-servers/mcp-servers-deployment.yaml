@@ -1,0 +1,501 @@
+---
+# MCP Servers — All 6 Deployments + Services
+# Namespace: mec-content-ai
+# SCC: restricted-v2 (OpenShift 4.21 default)
+#
+# Security applied uniformly to all servers:
+#   - Dedicated ServiceAccount per server (defined in rbac.yaml)
+#   - Pod securityContext: runAsNonRoot, seccompProfile RuntimeDefault
+#   - Container securityContext: allowPrivilegeEscalation=false, drop ALL caps
+#
+# RBAC: see ../rbac.yaml for ServiceAccounts, ClusterRole, and RoleBindings
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. mcp-network-intel
+# Wraps: 5G network APIs (mock mode for demo, real NEF API in production)
+# RBAC: no special permissions needed — makes outbound HTTP calls only
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-network-intel
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-network-intel
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-network-intel
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mcp-network-intel
+        app.kubernetes.io/part-of: mec-content-ai
+    spec:
+      serviceAccountName: mcp-network-intel-sa
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mcp-network-intel
+          image: image-registry.openshift-image-registry.svc:5000/mec-content-ai/mcp-network-intel:latest
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: MOCK_MODE
+              value: "true"   # set "false" + NETWORK_INTEL_API_URL for production
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-network-intel
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-network-intel
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  selector:
+    app.kubernetes.io/name: mcp-network-intel
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. mcp-kafka
+# Wraps: AMQ Streams Kafka (confluent-kafka producer/consumer)
+# RBAC: no K8s RBAC needed — connects to Kafka bootstrap via TCP, not K8s API
+# Network: needs TCP access to mec-ai-data namespace (Kafka port 9092)
+# ─────────────────────────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-kafka
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-kafka
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-kafka
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mcp-kafka
+        app.kubernetes.io/part-of: mec-content-ai
+    spec:
+      serviceAccountName: mcp-kafka-sa
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mcp-kafka
+          image: image-registry.openshift-image-registry.svc:5000/mec-content-ai/mcp-kafka:latest
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: KAFKA_BOOTSTRAP
+              value: "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-kafka
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-kafka
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  selector:
+    app.kubernetes.io/name: mcp-kafka
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. mcp-aap
+# Wraps: AAP 2.5 REST API (AutomationController)
+# RBAC: no K8s RBAC needed — calls AAP via HTTP REST using Bearer token
+# Auth: AAP_TOKEN from aap-secret (created by apply-secrets.sh --phase 05)
+# ─────────────────────────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-aap
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-aap
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-aap
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mcp-aap
+        app.kubernetes.io/part-of: mec-content-ai
+    spec:
+      serviceAccountName: mcp-aap-sa
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mcp-aap
+          image: image-registry.openshift-image-registry.svc:5000/mec-content-ai/mcp-aap:latest
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: AAP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: aap-secret
+                  key: host
+            - name: AAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aap-secret
+                  key: token
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-aap
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-aap
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  selector:
+    app.kubernetes.io/name: mcp-aap
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. mcp-slack
+# Wraps: Slack Web API (outbound HTTPS to api.slack.com)
+# RBAC: no K8s RBAC needed — outbound HTTPS calls only
+# Auth: SLACK_BOT_TOKEN from slack-secret
+# Network: needs egress to api.slack.com:443 (external internet)
+# ─────────────────────────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-slack
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-slack
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-slack
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mcp-slack
+        app.kubernetes.io/part-of: mec-content-ai
+    spec:
+      serviceAccountName: mcp-slack-sa
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mcp-slack
+          image: image-registry.openshift-image-registry.svc:5000/mec-content-ai/mcp-slack:latest
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: SLACK_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: slack-secret
+                  key: bot-token
+            - name: AGENT_API_URL
+              value: "https://content-intelligence-agent-mec-content-ai.apps.cluster.local"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-slack
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-slack
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  selector:
+    app.kubernetes.io/name: mcp-slack
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. mcp-kubeflow
+# Wraps: Kubeflow Pipelines REST API + MLflow Model Registry
+# RBAC: no K8s RBAC needed — calls ds-pipeline-dspa via HTTP REST with bearer token
+# Auth: KUBEFLOW_TOKEN from mcp-kubeflow-secret
+# Network: needs access to redhat-ods-applications namespace (ds-pipeline-dspa svc)
+# ─────────────────────────────────────────────────────────────────────────────
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mcp-kubeflow-secret
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+  annotations:
+    note: "KUBEFLOW_TOKEN — generate via: oc create token mcp-kubeflow-sa -n redhat-ods-applications"
+type: Opaque
+stringData:
+  token: ""   # populate via apply-secrets.sh or manual oc patch
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-kubeflow
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-kubeflow
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-kubeflow
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mcp-kubeflow
+        app.kubernetes.io/part-of: mec-content-ai
+    spec:
+      serviceAccountName: mcp-kubeflow-sa
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mcp-kubeflow
+          image: image-registry.openshift-image-registry.svc:5000/mec-content-ai/mcp-kubeflow:latest
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: KUBEFLOW_HOST
+              value: "http://ds-pipeline-dspa.redhat-ods-applications.svc.cluster.local:8888"
+            - name: MLFLOW_HOST
+              value: "http://mlflow.mec-ai-data.svc.cluster.local:5000"
+            - name: KUBEFLOW_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-kubeflow-secret
+                  key: token
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-kubeflow
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-kubeflow
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  selector:
+    app.kubernetes.io/name: mcp-kubeflow
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. mcp-openshift
+# Wraps: OpenShift/K8s API (in-cluster)
+# RBAC: uses mcp-openshift-sa with mcp-openshift-role ClusterRole (defined in rbac.yaml)
+#   - Read pods, nodes across all namespaces
+#   - Read deployments across all namespaces
+#   - Read KServe InferenceServices across all namespaces
+# Auth: in-cluster service account token (mounted automatically by Kubernetes)
+# ─────────────────────────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-openshift
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-openshift
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-openshift
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mcp-openshift
+        app.kubernetes.io/part-of: mec-content-ai
+    spec:
+      serviceAccountName: mcp-openshift-sa     # bound to mcp-openshift-role via rbac.yaml
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mcp-openshift
+          image: image-registry.openshift-image-registry.svc:5000/mec-content-ai/mcp-openshift:latest
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-openshift
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-openshift
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  selector:
+    app.kubernetes.io/name: mcp-openshift
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

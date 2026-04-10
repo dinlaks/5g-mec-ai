@@ -1,0 +1,236 @@
+---
+# Playbook: prefetch-content.yml
+# Triggered by: EDA (confidence >= 0.95, auto) OR LangGraph agent via mcp-aap
+#
+# What it does:
+#   Pulls video segments for a predicted content demand event from the CDN origin
+#   onto the MEC node's local NVMe cache (/var/mec-cache) via the Cache Manager pod.
+#   After caching, publishes updated cache state to Kafka cache.state topic.
+#
+# Variables (passed via AAP job template extra_vars):
+#   mec_site_id       — target MEC node (e.g. "mec-stadium-01")
+#   content_id        — content identifier (e.g. "nfl-chiefs-ravens-2026-01-18")
+#   content_url       — CDN origin base URL for this content
+#   predicted_viewers — expected concurrent viewer count
+#   event_type        — "live_sport" | "live_concert" | "vod_premiere"
+#   event_start_utc   — ISO8601 event start time
+#   confidence        — LSTM prediction confidence score
+#   triggered_by      — "eda-auto" | "langgraph-agent"
+#
+# How it reaches the far edge:
+#   AAP Controller (near edge) uses the MEC cluster kubeconfig (from AAP credential)
+#   to apply a short-lived Kubernetes Job on the target far-edge SNO cluster.
+#   The Job runs inside the cache-manager namespace and uses the same NVMe mount.
+
+- name: Pre-fetch content to MEC NVMe cache
+  hosts: localhost
+  gather_facts: false
+  vars:
+    cache_namespace: far-edge-mec
+    cache_manager_image: "registry.redhat.io/ubi9/ubi-minimal:latest"
+    cache_base_path: "/var/mec-cache"
+    kafka_bootstrap: "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092"
+    max_cache_gb: 50
+    job_timeout_seconds: 600
+
+  tasks:
+
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - mec_site_id is defined and mec_site_id | length > 0
+          - content_id is defined and content_id | length > 0
+          - content_url is defined and content_url | length > 0
+        fail_msg: "Required variables mec_site_id, content_id, content_url must be set"
+
+    - name: Log prefetch start
+      ansible.builtin.debug:
+        msg: >
+          Starting prefetch for {{ content_id }} on {{ mec_site_id }}.
+          Expected viewers: {{ predicted_viewers | default('unknown') }}.
+          Confidence: {{ confidence | default('unknown') }}.
+          Triggered by: {{ triggered_by | default('unknown') }}.
+
+    # ── Step 1: Check available NVMe cache space on MEC cluster ────────────────
+    - name: Create cache space check job on MEC cluster
+      kubernetes.core.k8s:
+        kubeconfig: "{{ lookup('env', 'MEC_KUBECONFIG_' + mec_site_id | upper | replace('-', '_')) }}"
+        state: present
+        definition:
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: "cache-check-{{ content_id | replace('/', '-') | truncate(40, True, '') }}"
+            namespace: "{{ cache_namespace }}"
+            labels:
+              app.kubernetes.io/part-of: mec-content-ai
+              mec.site: "{{ mec_site_id }}"
+          spec:
+            ttlSecondsAfterFinished: 60
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: cache-check
+                    image: "{{ cache_manager_image }}"
+                    command:
+                      - /bin/sh
+                      - -c
+                      - |
+                        df -BG {{ cache_base_path }} | tail -1 | awk '{print $4}' | tr -d 'G'
+                    volumeMounts:
+                      - name: mec-cache
+                        mountPath: "{{ cache_base_path }}"
+                volumes:
+                  - name: mec-cache
+                    hostPath:
+                      path: /var/mec-cache
+                      type: DirectoryOrCreate
+
+    - name: Wait for cache check job to complete
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ lookup('env', 'MEC_KUBECONFIG_' + mec_site_id | upper | replace('-', '_')) }}"
+        api_version: batch/v1
+        kind: Job
+        name: "cache-check-{{ content_id | replace('/', '-') | truncate(40, True, '') }}"
+        namespace: "{{ cache_namespace }}"
+        wait: true
+        wait_condition:
+          type: Complete
+          status: "True"
+        wait_timeout: 30
+
+    # ── Step 2: Apply prefetch job to MEC cluster ──────────────────────────────
+    - name: Create prefetch job on target MEC cluster
+      kubernetes.core.k8s:
+        kubeconfig: "{{ lookup('env', 'MEC_KUBECONFIG_' + mec_site_id | upper | replace('-', '_')) }}"
+        state: present
+        definition:
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: "prefetch-{{ content_id | replace('/', '-') | truncate(40, True, '') }}"
+            namespace: "{{ cache_namespace }}"
+            labels:
+              app.kubernetes.io/part-of: mec-content-ai
+              mec.job-type: prefetch
+              mec.content-id: "{{ content_id }}"
+              mec.site: "{{ mec_site_id }}"
+            annotations:
+              mec.triggered-by: "{{ triggered_by | default('unknown') }}"
+              mec.confidence: "{{ confidence | default('0') | string }}"
+              mec.event-start: "{{ event_start_utc | default('') }}"
+          spec:
+            ttlSecondsAfterFinished: 300
+            activeDeadlineSeconds: "{{ job_timeout_seconds }}"
+            template:
+              spec:
+                restartPolicy: OnFailure
+                containers:
+                  - name: prefetch
+                    image: "{{ cache_manager_image }}"
+                    command:
+                      - /bin/sh
+                      - -c
+                      - |
+                        set -e
+                        CACHE_DIR="{{ cache_base_path }}/{{ content_id }}"
+                        mkdir -p "${CACHE_DIR}"
+
+                        echo "[prefetch] Downloading content from {{ content_url }}"
+                        echo "[prefetch] Target: ${CACHE_DIR}"
+
+                        # Download the HLS/DASH manifest first
+                        curl -sSf -o "${CACHE_DIR}/manifest.m3u8" \
+                          "{{ content_url }}/manifest.m3u8" || \
+                        curl -sSf -o "${CACHE_DIR}/manifest.mpd" \
+                          "{{ content_url }}/manifest.mpd"
+
+                        # Download all quality renditions defined in manifest
+                        # 360p, 720p, 1080p segments for first 30 minutes of content
+                        for quality in 360p 720p 1080p; do
+                          QUALITY_DIR="${CACHE_DIR}/${quality}"
+                          mkdir -p "${QUALITY_DIR}"
+                          echo "[prefetch] Fetching ${quality} segments..."
+                          wget -q -r -np -nd -P "${QUALITY_DIR}" \
+                            --accept "*.ts,*.m4s,*.fmp4" \
+                            --tries=3 \
+                            --timeout=30 \
+                            "{{ content_url }}/${quality}/" || true
+                        done
+
+                        # Report cache size
+                        CACHE_SIZE=$(du -sh "${CACHE_DIR}" | cut -f1)
+                        echo "[prefetch] Complete. Cache size for {{ content_id }}: ${CACHE_SIZE}"
+
+                        # Write completion marker for Cache Manager to pick up
+                        echo "{
+                          \"content_id\": \"{{ content_id }}\",
+                          \"mec_site_id\": \"{{ mec_site_id }}\",
+                          \"cache_path\": \"${CACHE_DIR}\",
+                          \"cache_size\": \"${CACHE_SIZE}\",
+                          \"status\": \"ready\",
+                          \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+                        }" > "${CACHE_DIR}/.cache-manifest.json"
+
+                        echo "[prefetch] Done."
+                    resources:
+                      requests:
+                        cpu: 500m
+                        memory: 256Mi
+                      limits:
+                        cpu: "2"
+                        memory: 512Mi
+                    volumeMounts:
+                      - name: mec-cache
+                        mountPath: "{{ cache_base_path }}"
+                volumes:
+                  - name: mec-cache
+                    hostPath:
+                      path: /var/mec-cache
+                      type: DirectoryOrCreate
+
+    - name: Wait for prefetch job to complete
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ lookup('env', 'MEC_KUBECONFIG_' + mec_site_id | upper | replace('-', '_')) }}"
+        api_version: batch/v1
+        kind: Job
+        name: "prefetch-{{ content_id | replace('/', '-') | truncate(40, True, '') }}"
+        namespace: "{{ cache_namespace }}"
+        wait: true
+        wait_condition:
+          type: Complete
+          status: "True"
+        wait_timeout: "{{ job_timeout_seconds }}"
+      register: prefetch_job_result
+
+    - name: Log prefetch completion
+      ansible.builtin.debug:
+        msg: "Prefetch job completed for {{ content_id }} on {{ mec_site_id }}"
+
+    # ── Step 3: Publish cache state update to Kafka ────────────────────────────
+    - name: Publish cache state to Kafka cache.state topic
+      community.general.kafka_produce:
+        kafka_brokers: "{{ kafka_bootstrap }}"
+        topic: cache.state
+        messages:
+          - value: >
+              {
+                "mec_site_id": "{{ mec_site_id }}",
+                "content_id": "{{ content_id }}",
+                "event_type": "{{ event_type | default('unknown') }}",
+                "status": "prefetched",
+                "predicted_viewers": {{ predicted_viewers | default(0) }},
+                "triggered_by": "{{ triggered_by | default('aap') }}",
+                "confidence": {{ confidence | default(0) }},
+                "timestamp": "{{ ansible_date_time.iso8601 }}"
+              }
+      ignore_errors: true    # don't fail the playbook if Kafka publish fails
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >
+          ✅ Prefetch complete.
+          Site: {{ mec_site_id }} | Content: {{ content_id }} |
+          Viewers predicted: {{ predicted_viewers | default('unknown') }} |
+          Triggered by: {{ triggered_by | default('aap') }}

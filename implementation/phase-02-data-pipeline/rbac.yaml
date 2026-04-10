@@ -1,0 +1,96 @@
+---
+# Phase 02 — RBAC
+# ServiceAccounts + image-puller RoleBindings for all Phase 02 standalone Deployments.
+# Apply this before applying any Phase 02 deployment YAMLs.
+#
+# Components covered:
+#   postgresql  → mec-ai-obs namespace
+#   redis       → mec-ai-obs namespace
+#   clickhouse  → mec-ai-obs namespace
+#   minio       → mec-ai-data namespace
+#
+# SCC: restricted-v2 (OpenShift 4.21 default)
+# No special ClusterRoles needed — these pods make no K8s API calls.
+# All pods need system:image-puller to pull from quay.io / registry.redhat.io
+# (note: external registries — image-puller binding is for internal registry only;
+#  external pulls use the default pull secret from openshift-config)
+
+# ── mec-ai-obs ServiceAccounts ────────────────────────────────────────────────
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postgresql-sa
+  namespace: mec-ai-obs
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: redis-sa
+  namespace: mec-ai-obs
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: clickhouse-sa
+  namespace: mec-ai-obs
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+
+# ── mec-ai-data ServiceAccounts ───────────────────────────────────────────────
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: minio-sa
+  namespace: mec-ai-data
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+
+# ── Image Puller RoleBindings (internal registry) ─────────────────────────────
+# Needed if images are ever pushed to the internal OCP registry.
+# For external images (quay.io, registry.redhat.io), the cluster-wide
+# pull secret in openshift-config handles auth — no SA binding needed.
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mec-ai-obs-image-pullers
+  namespace: mec-ai-obs
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:image-puller
+subjects:
+  - kind: ServiceAccount
+    name: postgresql-sa
+    namespace: mec-ai-obs
+  - kind: ServiceAccount
+    name: redis-sa
+    namespace: mec-ai-obs
+  - kind: ServiceAccount
+    name: clickhouse-sa
+    namespace: mec-ai-obs
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mec-ai-data-image-pullers
+  namespace: mec-ai-data
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:image-puller
+subjects:
+  - kind: ServiceAccount
+    name: minio-sa
+    namespace: mec-ai-data

@@ -1,0 +1,26 @@
+---
+# ManagedClusterSet — near-edge
+# Groups the near-edge OpenShift cluster
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSet
+metadata:
+  name: near-edge-clusters
+spec:
+  clusterSelector:
+    selectorType: LabelSelector
+    labelSelector:
+      matchLabels:
+        cluster-role: near-edge
+---
+# ManagedClusterSet — far-edge
+# Groups all far-edge MEC node clusters
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSet
+metadata:
+  name: far-edge-mec-clusters
+spec:
+  clusterSelector:
+    selectorType: LabelSelector
+    labelSelector:
+      matchLabels:
+        cluster-role: far-edge

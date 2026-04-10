@@ -1,0 +1,22 @@
+---
+# Placement — far-edge MEC nodes
+# Selects ALL far-edge MEC clusters managed by ACM
+# ApplicationSet uses this placement to deploy workloads to every MEC node
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: placement-far-edge-mec
+  namespace: openshift-gitops
+spec:
+  clusterSets:
+    - far-edge-mec-clusters
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            cluster-role: far-edge
+            site-type: mec
+  # Tolerations allow selecting clusters even if they have conditions
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists

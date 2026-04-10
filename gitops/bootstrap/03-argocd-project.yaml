@@ -1,0 +1,39 @@
+---
+# ArgoCD AppProject — mec-content-ai
+# Scopes all MEC Content Intelligence applications
+# Limits which repos and clusters ArgoCD can deploy to
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: mec-content-ai
+  namespace: openshift-gitops
+spec:
+  description: "5G MEC Content Intelligence — Intelligent Pre-positioning & Adaptive Streaming"
+  sourceRepos:
+    - "https://github.com/*"     # restrict to your org when ready
+    - "https://charts.langfuse.com"
+  destinations:
+    # Near-edge cluster namespaces
+    - namespace: mec-content-ai
+      server: https://kubernetes.default.svc
+    - namespace: mec-ai-data
+      server: https://kubernetes.default.svc
+    - namespace: mec-ai-obs
+      server: https://kubernetes.default.svc
+    - namespace: redhat-ods-applications
+      server: https://kubernetes.default.svc
+    - namespace: aap
+      server: https://kubernetes.default.svc
+    - namespace: amq-streams
+      server: https://kubernetes.default.svc
+    # Far-edge MEC clusters (ACM-registered, wildcard)
+    - namespace: far-edge-mec
+      server: "*"
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  orphanedResources:
+    warn: true

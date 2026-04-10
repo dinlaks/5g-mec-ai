@@ -1,0 +1,38 @@
+---
+# ImageStream — stores built agent image
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: content-intelligence-agent
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: content-intelligence-agent
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+# BuildConfig — builds agent image from Git
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: content-intelligence-agent
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: content-intelligence-agent
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  source:
+    type: Git
+    git:
+      uri: "${GIT_REPO_URL}"
+      ref: main
+    contextDir: implementation/phase-05-agent-mcp/agent
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: content-intelligence-agent:latest
+  triggers:
+    - type: ConfigChange

@@ -1,0 +1,22 @@
+---
+# Wave 1 — OpenShift GitOps Operator
+# NOTE: This subscription is for reference only.
+# The actual GitOps operator bootstrap is in gitops/bootstrap/01-gitops-operator.yaml
+# That file is applied MANUALLY as the first step (before any GitOps-managed resources).
+# This file documents it as part of the foundation operator set.
+#
+# After GitOps is bootstrapped, all subsequent operator subscriptions
+# and resources are managed by ArgoCD — not applied manually.
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: openshift-gitops-operator
+  namespace: openshift-gitops-operator
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"   # sync before other resources
+spec:
+  channel: latest
+  installPlanApproval: Automatic
+  name: openshift-gitops-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace

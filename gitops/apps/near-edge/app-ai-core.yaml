@@ -1,0 +1,46 @@
+---
+# ArgoCD Application — AI Core (near-edge)
+# Manages: RHOAI DataScienceCluster, vLLM InferenceService, LlamaStack
+# Sync policy: MANUAL — model changes need deliberate promotion
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mec-ai-core
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+    tier: ai
+  annotations:
+    # Notify team before sync — model changes are high-impact
+    notifications.argoproj.io/subscribe.on-sync-running.slack: mec-ai-ops
+spec:
+  project: mec-content-ai
+  source:
+    repoURL: https://github.com/<YOUR_ORG>/5g-mec-ai.git
+    targetRevision: main
+    path: implementation/phase-03-ai-core
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: redhat-ods-applications
+  syncPolicy:
+    # Manual sync — prevents accidental model rollouts
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+  ignoreDifferences:
+    # vLLM InferenceService status managed by RHOAI controller
+    - group: serving.kserve.io
+      kind: InferenceService
+      jsonPointers:
+        - /status
+    - group: serving.kserve.io
+      kind: ServingRuntime
+      jsonPointers:
+        - /status

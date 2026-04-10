@@ -1,0 +1,248 @@
+---
+# MCP Servers — ImageStreams + BuildConfigs (all 6)
+# Each MCP server gets its own ImageStream and BuildConfig.
+# Builds from Git → internal OpenShift registry → referenced by mcp-servers-deployment.yaml
+#
+# Apply order:
+#   1. oc apply -f mcp-servers-buildconfig.yaml   (creates ImageStreams + BuildConfigs)
+#   2. oc start-build mcp-<name> -n mec-content-ai (trigger each build)
+#   OR set triggers in BuildConfig to auto-build on ConfigChange (default below)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. mcp-network-intel
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: mcp-network-intel
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-network-intel
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: mcp-network-intel
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-network-intel
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  source:
+    type: Git
+    git:
+      uri: "${GIT_REPO_URL}"
+      ref: main
+    contextDir: implementation/phase-05-agent-mcp/mcp-servers/mcp-network-intel
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: mcp-network-intel:latest
+  triggers:
+    - type: ConfigChange
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. mcp-kafka
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: mcp-kafka
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-kafka
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: mcp-kafka
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-kafka
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  source:
+    type: Git
+    git:
+      uri: "${GIT_REPO_URL}"
+      ref: main
+    contextDir: implementation/phase-05-agent-mcp/mcp-servers/mcp-kafka
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: mcp-kafka:latest
+  triggers:
+    - type: ConfigChange
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. mcp-aap
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: mcp-aap
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-aap
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: mcp-aap
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-aap
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  source:
+    type: Git
+    git:
+      uri: "${GIT_REPO_URL}"
+      ref: main
+    contextDir: implementation/phase-05-agent-mcp/mcp-servers/mcp-aap
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: mcp-aap:latest
+  triggers:
+    - type: ConfigChange
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. mcp-slack
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: mcp-slack
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-slack
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: mcp-slack
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-slack
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  source:
+    type: Git
+    git:
+      uri: "${GIT_REPO_URL}"
+      ref: main
+    contextDir: implementation/phase-05-agent-mcp/mcp-servers/mcp-slack
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: mcp-slack:latest
+  triggers:
+    - type: ConfigChange
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. mcp-kubeflow
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: mcp-kubeflow
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-kubeflow
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: mcp-kubeflow
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-kubeflow
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  source:
+    type: Git
+    git:
+      uri: "${GIT_REPO_URL}"
+      ref: main
+    contextDir: implementation/phase-05-agent-mcp/mcp-servers/mcp-kubeflow
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: mcp-kubeflow:latest
+  triggers:
+    - type: ConfigChange
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. mcp-openshift
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: mcp-openshift
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-openshift
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: mcp-openshift
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: mcp-openshift
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  source:
+    type: Git
+    git:
+      uri: "${GIT_REPO_URL}"
+      ref: main
+    contextDir: implementation/phase-05-agent-mcp/mcp-servers/mcp-openshift
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: mcp-openshift:latest
+  triggers:
+    - type: ConfigChange

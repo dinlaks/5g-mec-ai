@@ -1,0 +1,34 @@
+---
+# KServe InferenceService — LSTM Demand Predictor
+# Namespace: far-edge-mec (SNO far-edge node, CPU only)
+# Model: ~15MB ONNX LSTM — predicts content demand from telemetry window
+# Called by: demand-predictor Deployment (POST /v1/models/lstm-demand:predict)
+#
+# Model must be uploaded to MinIO before applying:
+#   mc cp lstm-demand.onnx mec-minio/mec-models/lstm-demand/latest/model.onnx
+# (See Phase 06 COMMANDS.md Step 3 for model upload instructions)
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: lstm-demand-predictor
+  namespace: far-edge-mec
+  labels:
+    app.kubernetes.io/name: lstm-demand-predictor
+    app.kubernetes.io/part-of: mec-content-ai
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment    # no Knative — raw K8s Deployment
+spec:
+  predictor:
+    model:
+      modelFormat:
+        name: lstm-onnx
+        version: "1"
+      runtime: lstm-runtime
+      storageUri: "s3://mec-models/lstm-demand/latest"
+      resources:
+        requests:
+          cpu: 200m
+          memory: 256Mi
+        limits:
+          cpu: "1"
+          memory: 512Mi

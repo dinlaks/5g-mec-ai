@@ -1,0 +1,34 @@
+---
+# ArgoCD Application — EdgeStream IQ Dashboard (near-edge)
+# Manages: EdgeStream IQ backend (FastAPI) + frontend (React + Vite)
+# Auto-sync: UI changes flow immediately through Git → build → deploy
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mec-dashboard
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+    tier: dashboard
+spec:
+  project: mec-content-ai
+  source:
+    repoURL: https://github.com/<YOUR_ORG>/5g-mec-ai.git
+    targetRevision: main
+    path: implementation/phase-07-dashboard
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: mec-content-ai
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

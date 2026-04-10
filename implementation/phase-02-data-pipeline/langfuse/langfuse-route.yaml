@@ -1,0 +1,23 @@
+---
+# OpenShift Route — Langfuse UI + API
+# Exposes Langfuse over HTTPS for:
+#   - Dashboard access (browser)
+#   - EdgeStream IQ backend (Panel G — AI health metrics)
+#   - Agent Langfuse SDK (trace ingestion)
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: langfuse
+  namespace: mec-ai-obs
+  labels:
+    app: langfuse
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  to:
+    kind: Service
+    name: langfuse-web
+  port:
+    targetPort: 3000
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

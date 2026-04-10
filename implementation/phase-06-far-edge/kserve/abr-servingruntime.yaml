@@ -1,0 +1,64 @@
+---
+# ABR Policy Engine — Model Server (Deployment, not KServe InferenceService)
+# Namespace: far-edge-mec (SNO far-edge node, CPU only)
+# Custom Python FastAPI server: reads /etc/mec/abr-policy.yaml (ConfigMap mount) via inotify,
+# receives subscriber context from Nginx, returns quality tier decision.
+# ConfigMap hot-reload: inotify detects file change → reloads config atomically.
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: abr-runtime
+  namespace: far-edge-mec
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  supportedModelFormats:
+    - name: abr-policy
+      version: "1"
+      autoSelect: true
+
+  containers:
+    - name: kserve-container
+      image: registry.access.redhat.com/ubi9/python-311:latest
+      command:
+        - /bin/sh
+        - -c
+        - |
+          pip install --quiet fastapi uvicorn watchdog pyyaml && \
+          python3 /app/abr_server.py
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 256Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        capabilities:
+          drop:
+            - ALL
+      env:
+        - name: ABR_POLICY_PATH
+          value: /etc/mec/abr-policy.yaml
+        - name: TELEMETRY_CACHE_PATH
+          value: /tmp/subscriber-cache.json
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+      readinessProbe:
+        httpGet:
+          path: /v1/models/abr-policy
+          port: 8080
+        initialDelaySeconds: 10
+        periodSeconds: 10
+      volumeMounts:
+        - name: abr-policy
+          mountPath: /etc/mec
+          readOnly: true
+
+  volumes:
+    - name: abr-policy
+      configMap:
+        name: abr-policy-config

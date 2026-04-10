@@ -1,0 +1,36 @@
+---
+# ABR Policy ConfigMap — Default quality caps
+# Namespace: far-edge-mec (SNO far-edge node)
+#
+# This is the DEFAULT policy — no quality caps (best effort).
+# Overwritten at runtime by AAP push-abr-policy.yml playbook.
+# When AAP updates this ConfigMap, Kubernetes propagates the change
+# to the volume mount in the ABR Policy Engine pod.
+# The inotify watcher in abr-policy-engine detects the change and hot-reloads.
+#
+# Do NOT change values here directly — always update via AAP playbook.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: abr-policy-config
+  namespace: far-edge-mec
+  labels:
+    app.kubernetes.io/name: abr-policy-engine
+    app.kubernetes.io/part-of: mec-content-ai
+  annotations:
+    mec.policy-managed-by: "aap-push-abr-policy-playbook"
+    mec.last-updated: "initial-default"
+data:
+  abr-policy.yaml: |
+    # Default ABR Quality Policy — no caps (best effort)
+    # Overwritten by AAP push-abr-policy.yml during demand events
+    event_type: "default"
+    rules:
+      - subscriber_tier: premium
+        max_quality: 4K
+      - subscriber_tier: standard
+        max_quality: 1080p
+      - signal_strength_below_dbm: -100
+        max_quality: 360p
+    default_quality: 1080p
+    live_low_latency: false

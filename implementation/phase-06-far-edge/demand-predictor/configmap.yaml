@@ -1,0 +1,208 @@
+---
+# Demand Predictor — Python script
+# Reads near-edge Kafka telemetry topics, calls KServe LSTM inference endpoint,
+# publishes prediction + confidence to demand.predictions topic.
+#
+# In production: LSTM model trained via Kubeflow, served via KServe InferenceService.
+# For AWS PoC: uses a rules-based predictor as fallback if KServe not yet ready,
+# but calls KServe endpoint when available.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demand-predictor-script
+  namespace: far-edge-mec
+  labels:
+    app.kubernetes.io/name: demand-predictor
+    app.kubernetes.io/part-of: mec-content-ai
+data:
+  predictor.py: |
+    #!/usr/bin/env python3
+    """
+    Demand Predictor — MEC Far Edge
+    Reads Kafka telemetry → calls KServe LSTM endpoint → publishes demand.predictions
+
+    Prediction logic:
+      1. Collect last N telemetry samples from Kafka
+      2. POST to KServe LSTM InferenceService REST endpoint
+      3. Parse prediction (content_id, predicted_viewers, confidence, peak_in_minutes)
+      4. Publish to demand.predictions if confidence >= 0.75
+
+    Fallback (if KServe not ready): rules-based prediction from telemetry trends.
+    """
+
+    import json
+    import os
+    import random
+    import time
+    import logging
+    from collections import deque
+    from datetime import datetime, timezone
+
+    import httpx
+    from confluent_kafka import Consumer, Producer, KafkaError
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] demand-predictor — %(message)s"
+    )
+    log = logging.getLogger(__name__)
+
+    # ── Config ────────────────────────────────────────────────────────────────
+    KAFKA_BOOTSTRAP  = os.getenv("KAFKA_BOOTSTRAP", "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092")
+    MEC_SITE_ID      = os.getenv("MEC_SITE_ID", "mec-stadium-01")
+    KSERVE_ENDPOINT  = os.getenv("KSERVE_LSTM_ENDPOINT", "http://lstm-demand-predictor.far-edge-mec.svc.cluster.local/v1/models/lstm-demand:predict")
+    PREDICTION_INTERVAL = int(os.getenv("PREDICTION_INTERVAL_SECONDS", "30"))
+    MIN_CONFIDENCE   = float(os.getenv("MIN_CONFIDENCE_THRESHOLD", "0.75"))
+    WINDOW_SIZE      = int(os.getenv("TELEMETRY_WINDOW_SIZE", "10"))
+
+    consumer = Consumer({
+        "bootstrap.servers": KAFKA_BOOTSTRAP,
+        "group.id": f"demand-predictor-{MEC_SITE_ID}",
+        "auto.offset.reset": "latest",
+        "enable.auto.commit": True,
+    })
+    consumer.subscribe(["ue.density.live", "content.requests.live", "network.capacity.live"])
+
+    producer = Producer({
+        "bootstrap.servers": KAFKA_BOOTSTRAP,
+        "client.id": f"demand-predictor-{MEC_SITE_ID}",
+    })
+
+    # Sliding window of recent telemetry samples
+    telemetry_window = deque(maxlen=WINDOW_SIZE)
+
+    # ── KServe inference ──────────────────────────────────────────────────────
+
+    def call_kserve_lstm(window: list) -> dict | None:
+        """Call KServe LSTM InferenceService with telemetry window."""
+        try:
+            payload = {
+                "inputs": [{
+                    "name": "telemetry_sequence",
+                    "shape": [1, len(window), 5],
+                    "datatype": "FP32",
+                    "data": [[
+                        s.get("active_ues", 0) / 50000,
+                        s.get("backhaul_utilization_pct", 50) / 100,
+                        s.get("video_requests_per_sec", 0) / 15000,
+                        s.get("peak_factor", 1.0) / 2.0,
+                        s.get("cache_hit_rate_pct", 15) / 100,
+                    ] for s in window]
+                }]
+            }
+            resp = httpx.post(KSERVE_ENDPOINT, json=payload, timeout=5)
+            resp.raise_for_status()
+            output = resp.json().get("outputs", [{}])[0].get("data", [])
+            if output:
+                return {
+                    "predicted_viewers": int(output[0] * 50000),
+                    "confidence":        float(output[1]),
+                    "peak_in_minutes":   int(output[2] * 60),
+                }
+        except Exception as e:
+            log.warning(f"KServe unavailable ({e}) — using rules-based fallback")
+        return None
+
+    def rules_based_prediction(window: list) -> dict:
+        """
+        Fallback rules-based predictor when KServe is not available.
+        Uses telemetry trends to estimate demand spike.
+        """
+        if len(window) < 2:
+            return {"predicted_viewers": 0, "confidence": 0.0, "peak_in_minutes": 60}
+
+        recent   = window[-1]
+        previous = window[0]
+
+        active_ues  = recent.get("active_ues", 0)
+        ue_growth   = (active_ues - previous.get("active_ues", active_ues)) / max(previous.get("active_ues", 1), 1)
+        utilization = recent.get("backhaul_utilization_pct", 50)
+        live_stream = recent.get("live_stream_active", False)
+
+        # Spike signal: UE growth + utilisation pressure + live stream
+        spike_score = (ue_growth * 0.4) + (utilization / 100 * 0.4) + (0.2 if live_stream else 0)
+        confidence  = min(0.94, max(0.60, spike_score))
+
+        predicted_viewers = int(active_ues * (1 + ue_growth * 3))
+        peak_in_minutes   = max(5, int(30 * (1 - spike_score)))
+
+        return {
+            "predicted_viewers": predicted_viewers,
+            "confidence":        round(confidence, 2),
+            "peak_in_minutes":   peak_in_minutes,
+        }
+
+    # ── Main loop ─────────────────────────────────────────────────────────────
+
+    def run():
+        log.info(f"Starting demand predictor for {MEC_SITE_ID}")
+        log.info(f"KServe: {KSERVE_ENDPOINT} | Window: {WINDOW_SIZE} | Min confidence: {MIN_CONFIDENCE}")
+
+        while True:
+            # Drain recent Kafka messages into window
+            msgs_read = 0
+            sample = {}
+            deadline = time.time() + 5.0  # read for 5 seconds
+
+            while time.time() < deadline:
+                msg = consumer.poll(timeout=0.5)
+                if msg is None or msg.error():
+                    continue
+                try:
+                    data = json.loads(msg.value().decode())
+                    sample.update(data)
+                    msgs_read += 1
+                except Exception:
+                    pass
+
+            if sample:
+                telemetry_window.append(sample)
+
+            if len(telemetry_window) < 2:
+                log.info(f"Collecting telemetry... ({len(telemetry_window)}/{WINDOW_SIZE} samples)")
+                time.sleep(PREDICTION_INTERVAL)
+                continue
+
+            window_list = list(telemetry_window)
+
+            # Try KServe first, fall back to rules-based
+            prediction = call_kserve_lstm(window_list) or rules_based_prediction(window_list)
+
+            confidence = prediction.get("confidence", 0.0)
+            predicted_viewers = prediction.get("predicted_viewers", 0)
+
+            if confidence >= MIN_CONFIDENCE and predicted_viewers > 1000:
+                # Determine top content ID from recent telemetry
+                top_content = window_list[-1].get("top_content_ids", ["unknown"])
+                content_id  = top_content[0] if top_content else "unknown"
+
+                event_payload = {
+                    "mec_site_id":               MEC_SITE_ID,
+                    "content_id":                content_id,
+                    "content_url":               f"http://cdn-mock.mec-content-ai.svc.cluster.local:8080/{content_id}",
+                    "predicted_viewers":         predicted_viewers,
+                    "event_type":                "live_sport" if "nfl" in content_id or "nba" in content_id else "vod_premiere",
+                    "event_start_utc":           datetime.now(timezone.utc).isoformat(),
+                    "confidence":                confidence,
+                    "predicted_peak_in_minutes": prediction.get("peak_in_minutes", 20),
+                    "timestamp":                 datetime.now(timezone.utc).isoformat(),
+                }
+
+                producer.produce("demand.predictions", json.dumps(event_payload).encode())
+                producer.flush()
+
+                log.info(
+                    f"Published demand.predictions — content: {content_id}, "
+                    f"viewers: {predicted_viewers}, confidence: {confidence:.2f}, "
+                    f"peak in: {prediction.get('peak_in_minutes', '?')}min"
+                )
+            else:
+                log.info(
+                    f"Prediction below threshold — confidence: {confidence:.2f} "
+                    f"(need ≥{MIN_CONFIDENCE}), viewers: {predicted_viewers}"
+                )
+
+            time.sleep(PREDICTION_INTERVAL)
+
+    if __name__ == "__main__":
+        run()

@@ -1,0 +1,84 @@
+---
+# EdgeStream IQ Frontend — Deployment
+# SCC: restricted-v2
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edgestream-iq-frontend
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: edgestream-iq-frontend
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: edgestream-iq-frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: edgestream-iq-frontend
+        app.kubernetes.io/part-of: mec-content-ai
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: frontend
+          image: image-registry.openshift-image-registry.svc:5000/mec-content-ai/edgestream-iq-frontend:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: [ALL]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: edgestream-iq-frontend
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: edgestream-iq-frontend
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  selector:
+    app.kubernetes.io/name: edgestream-iq-frontend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: edgestream-iq
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: edgestream-iq-frontend
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  to:
+    kind: Service
+    name: edgestream-iq-frontend
+  port:
+    targetPort: http
+  tls:
+    termination: Edge
+    insecureEdgeTerminationPolicy: Redirect

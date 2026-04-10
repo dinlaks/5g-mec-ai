@@ -1,0 +1,40 @@
+---
+# ArgoCD Application — Automation (near-edge)
+# Manages: AAP platform, EDA controller, EDA rulebook, ACM policies
+# Sync policy: MANUAL — AAP playbook changes need testing before rollout
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mec-automation
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+    tier: automation
+spec:
+  project: mec-content-ai
+  source:
+    repoURL: https://github.com/<YOUR_ORG>/5g-mec-ai.git
+    targetRevision: main
+    path: implementation/phase-04-automation
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: aap
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+  ignoreDifferences:
+    - group: aap.ansible.com
+      kind: AutomationController
+      jsonPointers:
+        - /status
+    - group: eda.ansible.com
+      kind: EDAController
+      jsonPointers:
+        - /status

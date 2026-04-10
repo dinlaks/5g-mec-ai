@@ -1,0 +1,172 @@
+---
+# Playbook: alert-noc.yml
+# Triggered by: LangGraph agent via mcp-aap (any critical event requiring NOC visibility)
+#
+# What it does:
+#   Sends a structured Slack notification to the NOC channel with full context
+#   about what the agent decided and why. This is the audit/visibility layer —
+#   NOC engineers see what the system did even when they don't need to act.
+#
+#   Message types:
+#     "action_taken"    — agent acted autonomously, informing NOC post-hoc
+#     "human_required"  — agent confidence below threshold, requesting approval
+#     "rollback"        — system triggered a rollback, NOC should be aware
+#     "anomaly"         — unexpected outcome, NOC may want to investigate
+#
+# Variables (passed via AAP job template extra_vars):
+#   alert_type        — "action_taken" | "human_required" | "rollback" | "anomaly"
+#   mec_site_id       — MEC node involved
+#   message           — main alert message (plain text)
+#   content_id        — content involved (optional)
+#   confidence        — agent/LSTM confidence score (optional)
+#   action_taken      — what the agent did (optional)
+#   cache_hit_rate    — current cache hit rate % (optional, for QoE context)
+#   triggered_by      — "langgraph-agent" | "eda-auto"
+#   approval_url      — URL for human to approve/reject (only for human_required)
+
+- name: Send NOC alert to Slack
+  hosts: localhost
+  gather_facts: true
+  vars:
+    slack_webhook_url: "{{ lookup('env', 'SLACK_WEBHOOK_URL') }}"
+    slack_channel: "{{ lookup('env', 'SLACK_NOC_CHANNEL') | default('#mec-ai-noc') }}"
+
+    # Emoji and colour per alert type
+    alert_configs:
+      action_taken:
+        emoji: "⚡"
+        color: "#36a64f"    # green
+        title: "Autonomous Action Taken"
+      human_required:
+        emoji: "🙋"
+        color: "#ff9900"    # orange
+        title: "Human Approval Required"
+      rollback:
+        emoji: "🔄"
+        color: "#e01e5a"    # red
+        title: "Rollback Triggered"
+      anomaly:
+        emoji: "⚠️"
+        color: "#ff9900"    # orange
+        title: "Anomaly Detected"
+
+  tasks:
+
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - slack_webhook_url is defined and slack_webhook_url | length > 0
+          - alert_type is defined
+          - mec_site_id is defined
+          - message is defined
+        fail_msg: "Required: SLACK_WEBHOOK_URL env var, alert_type, mec_site_id, message"
+
+    - name: Set alert config for this type
+      ansible.builtin.set_fact:
+        this_alert: "{{ alert_configs[alert_type] | default(alert_configs['anomaly']) }}"
+
+    # ── Build Slack message blocks ─────────────────────────────────────────────
+    - name: Build Slack message payload
+      ansible.builtin.set_fact:
+        slack_payload:
+          channel: "{{ slack_channel }}"
+          username: "MEC Content Intelligence"
+          icon_emoji: ":robot_face:"
+          attachments:
+            - color: "{{ this_alert.color }}"
+              title: "{{ this_alert.emoji }} {{ this_alert.title }}"
+              text: "{{ message }}"
+              fields:
+                - title: "MEC Site"
+                  value: "{{ mec_site_id }}"
+                  short: true
+                - title: "Alert Type"
+                  value: "{{ alert_type }}"
+                  short: true
+                - title: "Triggered By"
+                  value: "{{ triggered_by | default('system') }}"
+                  short: true
+                - title: "Timestamp"
+                  value: "{{ ansible_date_time.iso8601 }}"
+                  short: true
+                - title: "Content"
+                  value: "{{ content_id | default('N/A') }}"
+                  short: true
+                - title: "Confidence"
+                  value: "{{ confidence | default('N/A') }}"
+                  short: true
+                - title: "Action Taken"
+                  value: "{{ action_taken | default('N/A') }}"
+                  short: false
+                - title: "Cache Hit Rate"
+                  value: "{{ cache_hit_rate | default('N/A') }}"
+                  short: true
+              footer: "5G MEC Content Intelligence · {{ mec_site_id }}"
+              ts: "{{ ansible_date_time.epoch }}"
+
+    # ── Add approval button for human_required alerts ──────────────────────────
+    - name: Append approval action for human_required alerts
+      ansible.builtin.set_fact:
+        slack_payload: >-
+          {{ slack_payload | combine({
+            'attachments': slack_payload.attachments + [{
+              'color': '#ff9900',
+              'title': '👇 Action Required',
+              'text': 'Review the agent decision and approve or reject via the dashboard or Slack.',
+              'actions': [
+                {
+                  'type': 'button',
+                  'text': '✅ Approve',
+                  'style': 'primary',
+                  'url': approval_url | default('#')
+                },
+                {
+                  'type': 'button',
+                  'text': '❌ Reject',
+                  'style': 'danger',
+                  'url': (approval_url | default('#')) + '?action=reject'
+                }
+              ]
+            }]
+          }, recursive=True) }}
+      when: alert_type == 'human_required' and approval_url is defined
+
+    # ── Send to Slack ──────────────────────────────────────────────────────────
+    - name: Send Slack notification
+      ansible.builtin.uri:
+        url: "{{ slack_webhook_url }}"
+        method: POST
+        body_format: json
+        body: "{{ slack_payload }}"
+        status_code: 200
+        timeout: 15
+      register: slack_response
+      retries: 3
+      delay: 5
+      until: slack_response.status == 200
+
+    # ── Publish to Kafka agent.decisions for audit ─────────────────────────────
+    - name: Publish alert to Kafka agent.decisions topic
+      community.general.kafka_produce:
+        kafka_brokers: "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092"
+        topic: agent.decisions
+        messages:
+          - value: >
+              {
+                "action": "alert-noc",
+                "alert_type": "{{ alert_type }}",
+                "mec_site_id": "{{ mec_site_id }}",
+                "message": "{{ message | replace('"', '\\"') }}",
+                "content_id": "{{ content_id | default('') }}",
+                "confidence": {{ confidence | default(0) }},
+                "triggered_by": "{{ triggered_by | default('aap') }}",
+                "slack_channel": "{{ slack_channel }}",
+                "timestamp": "{{ ansible_date_time.iso8601 }}"
+              }
+      ignore_errors: true
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >
+          ✅ NOC alert sent to {{ slack_channel }}.
+          Type: {{ alert_type }} | Site: {{ mec_site_id }} | {{ message | truncate(80) }}

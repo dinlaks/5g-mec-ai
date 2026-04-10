@@ -1,0 +1,52 @@
+---
+# ArgoCD Instance — mec-content-ai
+# Uses the default openshift-gitops namespace ArgoCD instance
+# Patched to allow ACM-managed cluster registration
+apiVersion: argoproj.io/v1alpha1
+kind: ArgoCD
+metadata:
+  name: openshift-gitops
+  namespace: openshift-gitops
+spec:
+  server:
+    autoscale:
+      enabled: false
+    route:
+      enabled: true
+      tls:
+        termination: reencrypt
+  applicationSet:
+    enabled: true
+    resources:
+      limits:
+        cpu: "2"
+        memory: 1Gi
+      requests:
+        cpu: 250m
+        memory: 512Mi
+  repo:
+    resources:
+      limits:
+        cpu: "1"
+        memory: 1Gi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+  # Allow ArgoCD to manage resources in all namespaces
+  # ACM-registered clusters add their server entry automatically via GitOpsCluster
+  sourceNamespaces:
+    - mec-content-ai
+    - mec-ai-data
+    - mec-ai-obs
+    - far-edge-mec
+    - redhat-ods-applications
+    - aap
+    - amq-streams
+  rbac:
+    defaultPolicy: role:readonly
+    policy: |
+      p, role:mec-admin, applications, *, */*, allow
+      p, role:mec-admin, clusters, get, *, allow
+      p, role:mec-admin, repositories, *, *, allow
+      g, mec-admins, role:mec-admin
+    scopes: '[groups]'

@@ -1,0 +1,76 @@
+---
+# Telemetry Collector — Deployment
+# Namespace: far-edge-mec (on SNO far-edge node)
+# Reads UPF telemetry (mock on EC2) and publishes to near-edge Kafka every 30s
+# SCC: restricted-v2
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telemetry-collector
+  namespace: far-edge-mec
+  labels:
+    app.kubernetes.io/name: telemetry-collector
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: telemetry-collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: telemetry-collector
+        app.kubernetes.io/part-of: mec-content-ai
+    spec:
+      serviceAccountName: telemetry-collector-sa
+
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: collector
+          image: registry.access.redhat.com/ubi9/python-311:latest
+          command:
+            - python3
+            - /app/collector.py
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: KAFKA_BOOTSTRAP
+              value: "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092"
+            - name: MEC_SITE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['mec-site-id']
+            - name: VENUE_TYPE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['venue-type']
+            - name: PUBLISH_INTERVAL_SECONDS
+              value: "30"
+            - name: BASE_UE_COUNT
+              value: "45000"             # stadium — high density
+            - name: BACKHAUL_CAPACITY_MBPS
+              value: "2000"
+          volumeMounts:
+            - name: script
+              mountPath: /app
+
+      volumes:
+        - name: script
+          configMap:
+            name: telemetry-collector-script
+            defaultMode: 0755

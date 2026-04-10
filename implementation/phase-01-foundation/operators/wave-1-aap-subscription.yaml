@@ -1,0 +1,31 @@
+---
+# Wave 1 — Ansible Automation Platform (AAP) 2.5 Operator
+# Installs AAP operator which manages AutomationController + EDAController
+# AAP executes prefetch/QoS/ABR playbooks triggered by agent via aap-mcp
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aap
+  labels:
+    openshift.io/cluster-monitoring: "true"
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: aap
+  namespace: aap
+spec:
+  targetNamespaces:
+    - aap
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: ansible-automation-platform-operator
+  namespace: aap
+spec:
+  channel: stable-2.5
+  installPlanApproval: Automatic
+  name: ansible-automation-platform-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace

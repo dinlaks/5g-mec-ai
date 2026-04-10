@@ -1,0 +1,65 @@
+---
+# Wave 1 — Red Hat OpenShift AI (RHOAI) 3.3 Operator
+# Requires: cert-manager (wave 0) already running
+# Installs: RHOAI operator which manages vLLM, KServe, Kubeflow Pipelines, MLflow
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: redhat-ods-operator
+  labels:
+    openshift.io/cluster-monitoring: "true"
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: redhat-ods-operator
+  namespace: redhat-ods-operator
+spec:
+  targetNamespaces:
+    - redhat-ods-operator
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: rhods-operator
+  namespace: redhat-ods-operator
+spec:
+  channel: stable
+  installPlanApproval: Automatic
+  name: rhods-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+---
+# DataScienceCluster — enables RHOAI components needed for this use case
+# Enabled: ModelController (KServe), Kueue, CodeFlare, Dashboard, Workbenches
+# Also enables: DataSciencePipelinesApplications (Kubeflow Pipelines)
+apiVersion: datasciencecluster.opendatahub.io/v1
+kind: DataScienceCluster
+metadata:
+  name: default-dsc
+spec:
+  components:
+    kserve:
+      managementState: Managed
+      serving:
+        managementState: Managed
+        name: knative-serving
+        ingressGateway:
+          certificate:
+            type: OpenshiftDefaultIngress
+    modelmeshserving:
+      managementState: Removed    # using KServe only, not ModelMesh
+    dashboard:
+      managementState: Managed
+    workbenches:
+      managementState: Managed
+    datasciencepipelines:
+      managementState: Managed
+    kueue:
+      managementState: Managed
+    codeflare:
+      managementState: Managed
+    ray:
+      managementState: Removed    # not needed for this use case
+    trainingoperator:
+      managementState: Removed

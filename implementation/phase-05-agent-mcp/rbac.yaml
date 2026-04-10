@@ -1,0 +1,191 @@
+---
+# Phase 05 — RBAC
+# All ServiceAccounts, Roles, RoleBindings, ClusterRoles, ClusterRoleBindings
+# for Phase 05 components in the mec-content-ai namespace.
+#
+# Principle of least privilege:
+#   - Each component has its own ServiceAccount
+#   - Permissions are scoped to exactly what each component needs
+#   - mcp-openshift has a narrow ClusterRole (not cluster-reader)
+#   - All SAs get image-puller binding to pull from internal registry
+#
+# Namespace: mec-content-ai (all SAs live here)
+
+# ── ServiceAccounts ────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: content-intelligence-agent-sa
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-network-intel-sa
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-kafka-sa
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-aap-sa
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-slack-sa
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-kubeflow-sa
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-openshift-sa
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+
+# ── Image Puller RoleBindings ──────────────────────────────────────────────────
+# Each custom SA needs system:image-puller to pull from the internal OCP registry.
+# Without this, pods get ImagePullBackOff when using custom SAs.
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mec-content-ai-image-pullers
+  namespace: mec-content-ai
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:image-puller
+subjects:
+  - kind: ServiceAccount
+    name: content-intelligence-agent-sa
+    namespace: mec-content-ai
+  - kind: ServiceAccount
+    name: mcp-network-intel-sa
+    namespace: mec-content-ai
+  - kind: ServiceAccount
+    name: mcp-kafka-sa
+    namespace: mec-content-ai
+  - kind: ServiceAccount
+    name: mcp-aap-sa
+    namespace: mec-content-ai
+  - kind: ServiceAccount
+    name: mcp-slack-sa
+    namespace: mec-content-ai
+  - kind: ServiceAccount
+    name: mcp-kubeflow-sa
+    namespace: mec-content-ai
+  - kind: ServiceAccount
+    name: mcp-openshift-sa
+    namespace: mec-content-ai
+
+# ── mcp-openshift — Minimal ClusterRole ───────────────────────────────────────
+# Replaces the overly broad cluster-reader.
+# Grants read-only access to exactly the resources mcp-openshift tools need:
+#   get_pod_health         → pods (all namespaces)
+#   get_inferenceservice   → inferenceservices.serving.kserve.io (all namespaces)
+#   get_deployment_status  → deployments (all namespaces)
+#   get_node_resources     → nodes (cluster-scoped)
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mcp-openshift-role
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+rules:
+  # Pod health checks — used by context_enricher and outcome_verifier
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+
+  # Node resource checks — used by context_enricher (GPU node utilisation)
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+
+  # Deployment status — used by outcome_verifier (agent + MCP server self-check)
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+
+  # KServe InferenceService — used to check LSTM + ABR engine health at far edge
+  # Note: cluster-reader does NOT include this CRD — must be explicit
+  - apiGroups: ["serving.kserve.io"]
+    resources: ["inferenceservices"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mcp-openshift-role-binding
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: mcp-openshift-role
+subjects:
+  - kind: ServiceAccount
+    name: mcp-openshift-sa
+    namespace: mec-content-ai
+
+# ── mcp-kubeflow — Cross-namespace access to redhat-ods-applications ──────────
+# mcp-kubeflow calls the Kubeflow Pipelines API (ds-pipeline-dspa) which runs
+# in redhat-ods-applications. The SA needs no special K8s RBAC for this —
+# it calls the pipeline via HTTP REST API using a bearer token.
+# The token is provided via KUBEFLOW_TOKEN env var from a secret.
+# No ClusterRole needed — access is via API auth, not K8s RBAC.
+
+# ── content-intelligence-agent — Secret read access ───────────────────────────
+# The agent reads secrets via env var injection (handled by Kubernetes).
+# No explicit secret-read RBAC needed for env var injection.
+# However, if agent ever needs to read secrets programmatically, add:
+# (currently not needed — keeping minimal)
+
+# ── SCC Annotation Notes ───────────────────────────────────────────────────────
+# All components use restricted-v2 SCC (OpenShift 4.21 default).
+# This is enforced via securityContext in each Deployment (see deployment.yaml).
+# No SCC annotation needed on SAs when using restricted-v2 compatible settings:
+#   - runAsNonRoot: true
+#   - allowPrivilegeEscalation: false
+#   - capabilities.drop: ALL
+#   - seccompProfile: RuntimeDefault
+#
+# If a component requires a different SCC in future, annotate the SA:
+#   oc adm policy add-scc-to-user <scc-name> -z <sa-name> -n mec-content-ai

@@ -1,0 +1,32 @@
+---
+# EDA Controller — Event-Driven Ansible 2.5
+# Namespace: aap
+# Listens on Kafka demand.predictions topic
+# Role: parallel safety net alongside the LangGraph agent
+#   - If confidence > 0.95 → auto-trigger prefetch WITHOUT waiting for agent
+#   - This pre-warms the cache while agent is still in strategy_reasoner node
+#   - Normal agent flow (confidence 0.85-0.95) goes through mcp-aap instead
+apiVersion: eda.ansible.com/v1alpha1
+kind: EDAController
+metadata:
+  name: eda-controller
+  namespace: aap
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  # Points to the AutomationController for job execution
+  automation_server_url: "https://controller-service.aap.svc.cluster.local"
+  automation_server_ssl_verify: "no"    # internal cluster traffic
+
+  replicas: 1
+
+  resource_requirements:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+  # Route for EDA UI
+  route_tls_termination_mechanism: Edge

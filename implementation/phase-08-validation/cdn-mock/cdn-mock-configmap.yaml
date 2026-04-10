@@ -1,0 +1,87 @@
+---
+# CDN Mock — Nginx ConfigMap
+# Serves pre-downloaded Big Buck Bunny HLS segments (Option 1)
+# Falls back to proxying public Mux test stream (Option 3)
+# This simulates a CDN origin that MEC Cache Manager pre-fetches from
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cdn-mock-nginx-config
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: cdn-mock
+    app.kubernetes.io/part-of: mec-content-ai
+    mec.component: demo
+data:
+  nginx.conf: |
+    worker_processes auto;
+    pid /tmp/nginx.pid;
+    error_log /var/log/nginx/error.log warn;
+
+    events { worker_connections 1024; }
+
+    http {
+      include       /etc/nginx/mime.types;
+      default_type  application/octet-stream;
+
+      types {
+        application/vnd.apple.mpegurl  m3u8;
+        video/mp2t                     ts;
+        video/mp4                      mp4 m4s m4v;
+      }
+
+      log_format main '$remote_addr [$time_local] "$request" $status $body_bytes_sent';
+      access_log /var/log/nginx/access.log main;
+
+      # Public CDN fallback upstream (Option 3 — Big Buck Bunny via Mux)
+      upstream public_cdn {
+        server test-streams.mux.dev:443;
+      }
+
+      server {
+        listen 8080;
+        server_name _;
+        root /usr/share/nginx/html;
+
+        # Health check
+        location /health {
+          access_log off;
+          return 200 '{"status":"ok","service":"cdn-mock"}';
+          add_header Content-Type application/json;
+        }
+
+        # Inventory — what is locally cached
+        location /cdn-status {
+          access_log off;
+          alias /usr/share/nginx/html/;
+          autoindex on;
+          autoindex_format json;
+        }
+
+        # Serve local content (Option 1 — pre-seeded)
+        # Falls back to public CDN proxy (Option 3) if not found locally
+        location /nfl-game/ {
+          add_header Access-Control-Allow-Origin *;
+          add_header Cache-Control "no-cache";
+          add_header X-CDN-Source "local";
+          try_files $uri @cdn_fallback;
+        }
+
+        # Option 3 — proxy to public Mux CDN as fallback
+        location @cdn_fallback {
+          rewrite ^/nfl-game/(.*)$ /x36xhzz/$1 break;
+          proxy_pass https://test-streams.mux.dev;
+          proxy_ssl_server_name on;
+          proxy_set_header Host test-streams.mux.dev;
+          proxy_connect_timeout 10s;
+          proxy_read_timeout 30s;
+          add_header X-CDN-Source "public-fallback";
+          add_header Access-Control-Allow-Origin *;
+        }
+
+        location / {
+          autoindex on;
+          add_header Access-Control-Allow-Origin *;
+        }
+      }
+    }

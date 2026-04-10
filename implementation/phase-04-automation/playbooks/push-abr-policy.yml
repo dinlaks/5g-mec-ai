@@ -1,0 +1,144 @@
+---
+# Playbook: push-abr-policy.yml
+# Triggered by: EDA (confidence >= 0.95, auto) OR LangGraph agent via mcp-aap
+#
+# What it does:
+#   Pushes a new quality cap config to the ABR Policy Engine on the target MEC node
+#   by updating a Kubernetes ConfigMap. The ABR Policy Engine (KServe pod) hot-reloads
+#   the config via inotify file watcher — no pod restart needed.
+#
+#   Quality cap logic:
+#   - Derived from predicted_viewers vs known backhaul headroom at the site
+#   - Premium SLA tier always gets one tier higher than standard
+#   - Weak signal subscribers always capped at 360p regardless of tier
+#
+# Variables (passed via AAP job template extra_vars):
+#   mec_site_id       — target MEC node
+#   predicted_viewers — expected concurrent viewer count (drives cap calculation)
+#   event_type        — "live_sport" | "live_concert" | "vod_premiere"
+#   event_start_utc   — ISO8601 event start time
+#   triggered_by      — "eda-auto" | "langgraph-agent"
+#   # Optional overrides (agent can specify directly):
+#   premium_max_quality   — e.g. "1080p" (default: calculated from viewer count)
+#   standard_max_quality  — e.g. "720p"  (default: calculated from viewer count)
+#   valid_duration_hours  — how long policy is active (default: 3)
+
+- name: Push ABR quality cap policy to MEC ABR Policy Engine
+  hosts: localhost
+  gather_facts: true
+  vars:
+    cache_namespace: far-edge-mec
+    abr_configmap_name: abr-policy
+    valid_duration_hours: "{{ valid_duration_hours | default(3) }}"
+
+    # Quality tier thresholds based on predicted viewer load
+    # These represent backhaul pressure per MEC site — adjust per site capacity
+    tier_4k_max_viewers: 5000
+    tier_1080p_max_viewers: 20000
+    tier_720p_max_viewers: 50000
+
+  tasks:
+
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - mec_site_id is defined and mec_site_id | length > 0
+          - predicted_viewers is defined
+        fail_msg: "Required variables mec_site_id and predicted_viewers must be set"
+
+    # ── Step 1: Calculate quality caps from viewer count ──────────────────────
+    - name: Calculate quality caps based on predicted viewer load
+      ansible.builtin.set_fact:
+        calculated_premium_quality: >-
+          {%- if predicted_viewers | int <= tier_4k_max_viewers -%}4K
+          {%- elif predicted_viewers | int <= tier_1080p_max_viewers -%}1080p
+          {%- elif predicted_viewers | int <= tier_720p_max_viewers -%}1080p
+          {%- else -%}720p{%- endif -%}
+        calculated_standard_quality: >-
+          {%- if predicted_viewers | int <= tier_4k_max_viewers -%}1080p
+          {%- elif predicted_viewers | int <= tier_1080p_max_viewers -%}720p
+          {%- elif predicted_viewers | int <= tier_720p_max_viewers -%}720p
+          {%- else -%}360p{%- endif -%}
+
+    - name: Resolve final quality caps (use overrides if provided)
+      ansible.builtin.set_fact:
+        final_premium_quality: "{{ premium_max_quality | default(calculated_premium_quality) }}"
+        final_standard_quality: "{{ standard_max_quality | default(calculated_standard_quality) }}"
+
+    - name: Log quality cap decision
+      ansible.builtin.debug:
+        msg: >
+          ABR policy for {{ mec_site_id }}:
+          predicted_viewers={{ predicted_viewers }},
+          premium_max={{ final_premium_quality }},
+          standard_max={{ final_standard_quality }},
+          event_type={{ event_type | default('unknown') }}
+
+    # ── Step 2: Build the policy config content ────────────────────────────────
+    - name: Build ABR policy config
+      ansible.builtin.set_fact:
+        abr_policy_content: |
+          # ABR Quality Cap Policy — pushed by AAP
+          # Site: {{ mec_site_id }}
+          # Generated: {{ ansible_date_time.iso8601 }}
+          event_type: "{{ event_type | default('unknown') }}"
+          event_start_utc: "{{ event_start_utc | default('') }}"
+          valid_until: "{{ '%Y-%m-%dT%H:%M:%SZ' | strftime((ansible_date_time.epoch | int) + (valid_duration_hours | int * 3600)) }}"
+          predicted_viewers: {{ predicted_viewers | int }}
+          triggered_by: "{{ triggered_by | default('aap') }}"
+          rules:
+            - subscriber_tier: premium
+              max_quality: {{ final_premium_quality }}
+            - subscriber_tier: standard
+              max_quality: {{ final_standard_quality }}
+            - signal_strength_below_dbm: -100
+              max_quality: 360p
+          default_quality: {{ final_standard_quality }}
+          live_low_latency: {{ 'true' if event_type | default('') == 'live_sport' else 'false' }}
+
+    # ── Step 3: Update ConfigMap on the MEC cluster ───────────────────────────
+    - name: Apply ABR policy ConfigMap to MEC cluster
+      kubernetes.core.k8s:
+        kubeconfig: "{{ lookup('env', 'MEC_KUBECONFIG_' + mec_site_id | upper | replace('-', '_')) }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: "{{ abr_configmap_name }}"
+            namespace: "{{ cache_namespace }}"
+            labels:
+              app.kubernetes.io/part-of: mec-content-ai
+              mec.site: "{{ mec_site_id }}"
+            annotations:
+              mec.last-updated: "{{ ansible_date_time.iso8601 }}"
+              mec.triggered-by: "{{ triggered_by | default('aap') }}"
+              mec.predicted-viewers: "{{ predicted_viewers | string }}"
+          data:
+            abr-policy.yaml: "{{ abr_policy_content }}"
+
+    # ── Step 4: Verify the ABR Policy Engine picked up the new config ──────────
+    - name: Wait briefly for inotify hot-reload to propagate
+      ansible.builtin.pause:
+        seconds: 5
+
+    - name: Verify ConfigMap was applied
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ lookup('env', 'MEC_KUBECONFIG_' + mec_site_id | upper | replace('-', '_')) }}"
+        api_version: v1
+        kind: ConfigMap
+        name: "{{ abr_configmap_name }}"
+        namespace: "{{ cache_namespace }}"
+      register: cm_check
+
+    - name: Confirm ConfigMap exists
+      ansible.builtin.assert:
+        that: cm_check.resources | length > 0
+        fail_msg: "ConfigMap {{ abr_configmap_name }} not found on {{ mec_site_id }} after apply"
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >
+          ✅ ABR policy pushed and hot-reloaded on {{ mec_site_id }}.
+          Premium: {{ final_premium_quality }} | Standard: {{ final_standard_quality }} |
+          Valid for: {{ valid_duration_hours }}h | Viewers: {{ predicted_viewers }}

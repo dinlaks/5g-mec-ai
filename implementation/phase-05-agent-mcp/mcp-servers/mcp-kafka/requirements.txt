@@ -1,0 +1,2 @@
+fastmcp==3.0.2
+confluent-kafka==2.5.3

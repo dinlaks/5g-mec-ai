@@ -1,0 +1,129 @@
+---
+# ClickHouse — Langfuse Analytics Store
+# Namespace: mec-ai-obs
+# Stores: all LLM traces, spans, scores, token usage, latency data
+# Langfuse writes every agent LLM call + LangGraph node execution here
+# SCC: restricted-v2 — clickhouse/clickhouse-server Alpine image uses UID 101
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: clickhouse-pvc
+  namespace: mec-ai-obs
+  labels:
+    app: clickhouse
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3-csi
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clickhouse
+  namespace: mec-ai-obs
+  labels:
+    app: clickhouse
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clickhouse
+  template:
+    metadata:
+      labels:
+        app: clickhouse
+    spec:
+      serviceAccountName: clickhouse-sa
+
+      # ── Pod-level security (restricted-v2 SCC) ────────────────────────────
+      # clickhouse-server Alpine image uses UID 101 / GID 101 (clickhouse user)
+      # fsGroup: 101 ensures the PVC mount is writable by the clickhouse group
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: clickhouse
+          image: clickhouse/clickhouse-server:24.3-alpine
+          env:
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-clickhouse-secret
+                  key: user
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-clickhouse-secret
+                  key: password
+            - name: CLICKHOUSE_DB
+              value: langfuse
+          ports:
+            - containerPort: 8123
+              name: http
+            - containerPort: 9000
+              name: native
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: 500m
+            limits:
+              memory: 4Gi
+              cpu: "2"
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 8123
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 8123
+            initialDelaySeconds: 30
+            periodSeconds: 20
+
+          # ── Container-level security (restricted-v2 SCC) ──────────────────
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: clickhouse-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse
+  namespace: mec-ai-obs
+  labels:
+    app: clickhouse
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  selector:
+    app: clickhouse
+  ports:
+    - name: http
+      port: 8123
+      targetPort: 8123
+    - name: native
+      port: 9000
+      targetPort: 9000

@@ -1,0 +1,17 @@
+---
+# Placement — near-edge
+# Selects the near-edge OpenShift 4.21 cluster for near-edge ArgoCD Applications
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: placement-near-edge
+  namespace: openshift-gitops
+spec:
+  clusterSets:
+    - near-edge-clusters
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            cluster-role: near-edge
+  numberOfClusters: 1

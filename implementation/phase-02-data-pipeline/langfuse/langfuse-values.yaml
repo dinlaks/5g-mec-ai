@@ -1,0 +1,81 @@
+# Langfuse Helm Values — Self-hosted on OpenShift 4.21
+# Chart: langfuse/langfuse
+# Add repo: helm repo add langfuse https://langfuse.github.io/langfuse-k8s
+# Install: helm upgrade --install langfuse langfuse/langfuse -n mec-ai-obs -f langfuse-values.yaml
+
+langfuse:
+  # Pull secrets from existing Kubernetes Secrets (created by langfuse-secrets.yaml)
+  nextauth:
+    url: "https://langfuse.apps.<your-cluster-domain>"   # update with your Route URL
+    secret:
+      existingSecret: langfuse-app-secret
+      existingSecretKey: nextauth-secret
+
+  encryptionKey:
+    existingSecret: langfuse-app-secret
+    existingSecretKey: encryption-key
+
+  salt:
+    existingSecret: langfuse-app-secret
+    existingSecretKey: salt
+
+  # Database — use external PostgreSQL deployed in this phase
+  database:
+    existingSecret: langfuse-db-secret
+    existingSecretKey: database-url
+
+  # ClickHouse — analytics store
+  clickhouse:
+    host: clickhouse.mec-ai-obs.svc.cluster.local
+    port: 8123
+    nativePort: 9000
+    database: langfuse
+    existingSecret: langfuse-clickhouse-secret
+    existingSecretKeyUser: user
+    existingSecretKeyPassword: password
+
+  # Redis — queue backend
+  redis:
+    host: redis.mec-ai-obs.svc.cluster.local
+    port: 6379
+    auth:
+      enabled: false    # set to true if Redis is password-protected
+
+  # Disable bundled dependencies — using our own deployments
+  postgresql:
+    deploy: false
+  redis:
+    deploy: false
+  clickhouse:
+    deploy: false
+
+# Langfuse web server
+web:
+  replicaCount: 1
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 250m
+    limits:
+      memory: 1Gi
+      cpu: "1"
+  # OpenShift requires non-root — Langfuse runs as non-root by default
+
+# Langfuse worker (flushes Redis → ClickHouse)
+worker:
+  replicaCount: 1
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+# Disable built-in ingress — using OpenShift Route instead
+ingress:
+  enabled: false
+
+service:
+  type: ClusterIP
+  port: 3000

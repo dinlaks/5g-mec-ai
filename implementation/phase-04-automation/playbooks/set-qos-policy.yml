@@ -1,0 +1,125 @@
+---
+# Playbook: set-qos-policy.yml
+# Triggered by: LangGraph agent via mcp-aap
+#
+# What it does:
+#   Calls the 5G Core PCF (Policy Control Function) REST API to apply per-UE QoS
+#   flows for the target MEC site. The PCF enforces throughput guarantees/caps at
+#   the 5G user plane (UPF), which indirectly constrains the quality tier that
+#   the subscriber's ABR player can sustain.
+#
+#   Note on PCF integration:
+#   In a production deployment this calls the operator's PCF northbound API (N5/Rx interface).
+#   For demo/PoC this calls a mock PCF endpoint — replace PCF_API_URL in env.sh with
+#   the real PCF API endpoint when integrating with live 5G Core.
+#
+# Variables (passed via AAP job template extra_vars):
+#   mec_site_id         — target MEC site identifier
+#   event_type          — "live_sport" | "live_concert" | "vod_premiere"
+#   predicted_viewers   — expected concurrent viewer count
+#   triggered_by        — "langgraph-agent"
+#   # Optional:
+#   premium_throughput_mbps   — guaranteed throughput for premium UEs (default: 20)
+#   standard_throughput_mbps  — guaranteed throughput for standard UEs (default: 8)
+#   valid_duration_hours       — how long QoS policy is active (default: 3)
+
+- name: Apply per-UE QoS policy via 5G Core PCF API
+  hosts: localhost
+  gather_facts: true
+  vars:
+    pcf_api_url: "{{ lookup('env', 'PCF_API_URL') | default('http://pcf-mock.mec-content-ai.svc.cluster.local:8080') }}"
+    pcf_api_token: "{{ lookup('env', 'PCF_API_TOKEN') | default('') }}"
+    valid_duration_hours: "{{ valid_duration_hours | default(3) }}"
+
+    # Default throughput caps per subscriber tier
+    # Premium: guaranteed 20 Mbps (supports 1080p comfortably)
+    # Standard: guaranteed 8 Mbps (supports 720p comfortably)
+    default_premium_mbps: 20
+    default_standard_mbps: 8
+
+    # For live sports: prioritise low latency (LL-HLS) over throughput
+    low_latency_mode: "{{ 'true' if event_type | default('') == 'live_sport' else 'false' }}"
+
+  tasks:
+
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - mec_site_id is defined and mec_site_id | length > 0
+          - predicted_viewers is defined
+        fail_msg: "Required variables mec_site_id and predicted_viewers must be set"
+
+    # ── Step 1: Calculate throughput caps ─────────────────────────────────────
+    - name: Set throughput caps
+      ansible.builtin.set_fact:
+        final_premium_mbps: "{{ premium_throughput_mbps | default(default_premium_mbps) }}"
+        final_standard_mbps: "{{ standard_throughput_mbps | default(default_standard_mbps) }}"
+
+    - name: Log QoS policy being applied
+      ansible.builtin.debug:
+        msg: >
+          Applying QoS policy on {{ mec_site_id }}:
+          premium={{ final_premium_mbps }}Mbps, standard={{ final_standard_mbps }}Mbps,
+          low_latency={{ low_latency_mode }}, duration={{ valid_duration_hours }}h
+
+    # ── Step 2: Call PCF API to set policy ────────────────────────────────────
+    - name: Apply QoS policy via PCF northbound API
+      ansible.builtin.uri:
+        url: "{{ pcf_api_url }}/v1/policy/qos"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ pcf_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          mec_site_id: "{{ mec_site_id }}"
+          event_type: "{{ event_type | default('unknown') }}"
+          triggered_by: "{{ triggered_by | default('aap') }}"
+          valid_until: "{{ '%Y-%m-%dT%H:%M:%SZ' | strftime((ansible_date_time.epoch | int) + (valid_duration_hours | int * 3600)) }}"
+          low_latency_mode: "{{ low_latency_mode | bool }}"
+          qos_rules:
+            - subscriber_tier: premium
+              guaranteed_bitrate_mbps: "{{ final_premium_mbps | int }}"
+              max_bitrate_mbps: "{{ (final_premium_mbps | int) * 2 }}"
+              qci: 6    # QCI 6 = video streaming (guaranteed bit rate)
+            - subscriber_tier: standard
+              guaranteed_bitrate_mbps: "{{ final_standard_mbps | int }}"
+              max_bitrate_mbps: "{{ (final_standard_mbps | int) * 2 }}"
+              qci: 7    # QCI 7 = video streaming (non-GBR)
+        status_code: [200, 201, 202]
+        timeout: 30
+        validate_certs: false    # internal cluster traffic
+      register: pcf_response
+      retries: 3
+      delay: 5
+      until: pcf_response.status in [200, 201, 202]
+
+    - name: Log PCF response
+      ansible.builtin.debug:
+        msg: "PCF policy applied. Response: {{ pcf_response.json | default(pcf_response.status) }}"
+
+    # ── Step 3: Publish QoS action to Kafka agent.decisions ───────────────────
+    - name: Publish QoS action to Kafka agent.decisions topic
+      community.general.kafka_produce:
+        kafka_brokers: "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092"
+        topic: agent.decisions
+        messages:
+          - value: >
+              {
+                "action": "set-qos-policy",
+                "mec_site_id": "{{ mec_site_id }}",
+                "event_type": "{{ event_type | default('unknown') }}",
+                "premium_mbps": {{ final_premium_mbps | int }},
+                "standard_mbps": {{ final_standard_mbps | int }},
+                "low_latency_mode": {{ low_latency_mode }},
+                "triggered_by": "{{ triggered_by | default('aap') }}",
+                "timestamp": "{{ ansible_date_time.iso8601 }}"
+              }
+      ignore_errors: true
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >
+          ✅ QoS policy applied on {{ mec_site_id }} via PCF.
+          Premium: {{ final_premium_mbps }}Mbps | Standard: {{ final_standard_mbps }}Mbps |
+          Low latency mode: {{ low_latency_mode }}

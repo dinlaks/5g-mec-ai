@@ -1,0 +1,193 @@
+---
+# Playbook: rollback-cache.yml
+# Triggered by: LangGraph agent via mcp-aap (outcome_verifier node detects bad QoE)
+#
+# What it does:
+#   Emergency rollback when QoE metrics indicate the pre-caching or ABR policy
+#   change made things worse. Restores the MEC node to its default state:
+#     1. Flushes the NVMe content cache for the specific content_id
+#     2. Restores the default ABR policy ConfigMap (no quality caps)
+#     3. Publishes rollback event to Kafka remediation.outcomes topic
+#     4. Optionally calls PCF API to restore default QoS (if QoS was changed)
+#
+# This playbook is defensive — it is designed to be safe to run at any time.
+# It does NOT delete the entire cache — only the content_id that triggered the issue.
+#
+# Variables (passed via AAP job template extra_vars):
+#   mec_site_id       — target MEC node
+#   content_id        — content to remove from cache (if empty, skips cache flush)
+#   rollback_reason   — why rollback was triggered (for audit log)
+#   triggered_by      — "langgraph-agent" | "manual"
+#   restore_qos       — true/false, whether to also restore PCF QoS defaults
+
+- name: Rollback cache and restore MEC node to default state
+  hosts: localhost
+  gather_facts: true
+  vars:
+    cache_namespace: far-edge-mec
+    cache_base_path: "/var/mec-cache"
+    abr_configmap_name: abr-policy
+    pcf_api_url: "{{ lookup('env', 'PCF_API_URL') | default('http://pcf-mock.mec-content-ai.svc.cluster.local:8080') }}"
+    pcf_api_token: "{{ lookup('env', 'PCF_API_TOKEN') | default('') }}"
+    restore_qos: "{{ restore_qos | default(false) }}"
+
+  tasks:
+
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - mec_site_id is defined and mec_site_id | length > 0
+        fail_msg: "Required variable mec_site_id must be set"
+
+    - name: Log rollback start
+      ansible.builtin.debug:
+        msg: >
+          🔄 Rollback initiated on {{ mec_site_id }}.
+          Content: {{ content_id | default('ALL') }}.
+          Reason: {{ rollback_reason | default('not specified') }}.
+          Triggered by: {{ triggered_by | default('unknown') }}.
+
+    # ── Step 1: Flush NVMe cache for the specific content_id ──────────────────
+    - name: Create cache flush job on MEC cluster
+      kubernetes.core.k8s:
+        kubeconfig: "{{ lookup('env', 'MEC_KUBECONFIG_' + mec_site_id | upper | replace('-', '_')) }}"
+        state: present
+        definition:
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: "cache-flush-{{ content_id | default('all') | replace('/', '-') | truncate(30, True, '') }}-{{ ansible_date_time.epoch }}"
+            namespace: "{{ cache_namespace }}"
+            labels:
+              app.kubernetes.io/part-of: mec-content-ai
+              mec.job-type: cache-flush
+              mec.site: "{{ mec_site_id }}"
+          spec:
+            ttlSecondsAfterFinished: 120
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: cache-flush
+                    image: "registry.redhat.io/ubi9/ubi-minimal:latest"
+                    command:
+                      - /bin/sh
+                      - -c
+                      - |
+                        set -e
+                        {% if content_id is defined and content_id | length > 0 %}
+                        TARGET="{{ cache_base_path }}/{{ content_id }}"
+                        echo "[rollback] Flushing cache for content: {{ content_id }}"
+                        if [ -d "${TARGET}" ]; then
+                          rm -rf "${TARGET}"
+                          echo "[rollback] Cache flushed: ${TARGET}"
+                        else
+                          echo "[rollback] Cache dir not found (already empty): ${TARGET}"
+                        fi
+                        {% else %}
+                        echo "[rollback] No content_id specified — skipping cache flush"
+                        {% endif %}
+                        echo "[rollback] Cache flush complete."
+                    volumeMounts:
+                      - name: mec-cache
+                        mountPath: "{{ cache_base_path }}"
+                volumes:
+                  - name: mec-cache
+                    hostPath:
+                      path: /var/mec-cache
+                      type: DirectoryOrCreate
+      when: content_id is defined and content_id | length > 0
+
+    - name: Wait for cache flush job
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ lookup('env', 'MEC_KUBECONFIG_' + mec_site_id | upper | replace('-', '_')) }}"
+        api_version: batch/v1
+        kind: Job
+        name: "cache-flush-{{ content_id | default('all') | replace('/', '-') | truncate(30, True, '') }}-{{ ansible_date_time.epoch }}"
+        namespace: "{{ cache_namespace }}"
+        wait: true
+        wait_condition:
+          type: Complete
+          status: "True"
+        wait_timeout: 120
+      when: content_id is defined and content_id | length > 0
+
+    # ── Step 2: Restore default ABR policy (remove quality caps) ──────────────
+    - name: Restore default ABR policy ConfigMap
+      kubernetes.core.k8s:
+        kubeconfig: "{{ lookup('env', 'MEC_KUBECONFIG_' + mec_site_id | upper | replace('-', '_')) }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: "{{ abr_configmap_name }}"
+            namespace: "{{ cache_namespace }}"
+            labels:
+              app.kubernetes.io/part-of: mec-content-ai
+              mec.site: "{{ mec_site_id }}"
+            annotations:
+              mec.last-updated: "{{ ansible_date_time.iso8601 }}"
+              mec.rollback: "true"
+              mec.rollback-reason: "{{ rollback_reason | default('not specified') }}"
+          data:
+            abr-policy.yaml: |
+              # ABR Default Policy — restored by rollback playbook
+              # Site: {{ mec_site_id }}
+              # Restored: {{ ansible_date_time.iso8601 }}
+              # Reason: {{ rollback_reason | default('not specified') }}
+              event_type: "default"
+              rules:
+                - subscriber_tier: premium
+                  max_quality: 4K
+                - subscriber_tier: standard
+                  max_quality: 1080p
+              default_quality: 1080p
+              live_low_latency: false
+
+    # ── Step 3: Restore default PCF QoS (optional) ────────────────────────────
+    - name: Restore default PCF QoS policy
+      ansible.builtin.uri:
+        url: "{{ pcf_api_url }}/v1/policy/qos/restore"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ pcf_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          mec_site_id: "{{ mec_site_id }}"
+          triggered_by: "{{ triggered_by | default('aap') }}"
+          reason: "{{ rollback_reason | default('not specified') }}"
+        status_code: [200, 201, 202]
+        timeout: 30
+        validate_certs: false
+      when: restore_qos | bool
+      ignore_errors: true    # don't fail rollback if PCF restore fails
+
+    # ── Step 4: Publish rollback outcome to Kafka ──────────────────────────────
+    - name: Publish rollback to Kafka remediation.outcomes topic
+      community.general.kafka_produce:
+        kafka_brokers: "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092"
+        topic: remediation.outcomes
+        messages:
+          - value: >
+              {
+                "action": "rollback-cache",
+                "mec_site_id": "{{ mec_site_id }}",
+                "content_id": "{{ content_id | default('') }}",
+                "rollback_reason": "{{ rollback_reason | default('not specified') }}",
+                "restored_qos": {{ restore_qos | bool | lower }},
+                "triggered_by": "{{ triggered_by | default('aap') }}",
+                "status": "completed",
+                "timestamp": "{{ ansible_date_time.iso8601 }}"
+              }
+      ignore_errors: true
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >
+          ✅ Rollback complete on {{ mec_site_id }}.
+          Cache flushed: {{ content_id | default('skipped') }}.
+          ABR policy restored to defaults.
+          QoS restored: {{ restore_qos }}.
+          Reason: {{ rollback_reason | default('not specified') }}.

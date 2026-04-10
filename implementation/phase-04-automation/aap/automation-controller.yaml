@@ -1,0 +1,48 @@
+---
+# AutomationController — AAP 2.5
+# Namespace: aap
+# The AWX-based controller that manages job templates, inventories,
+# credentials, and playbook execution.
+# Playbooks in this use case are triggered by:
+#   1. mcp-aap (LangGraph agent → AAP REST API)
+#   2. EDA Controller (high-confidence Kafka events → direct AAP trigger)
+apiVersion: automationcontroller.ansible.com/v1beta1
+kind: AutomationController
+metadata:
+  name: controller
+  namespace: aap
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  replicas: 1
+  admin_user: admin
+  admin_password_secret: aap-admin-secret   # created by apply-secrets.sh --phase 04
+
+  # Resource limits for near-edge deployment
+  web_resource_requirements:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  task_resource_requirements:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+
+  # PostgreSQL for AAP internal state
+  postgres_storage_requirements:
+    requests:
+      storage: 20Gi
+    limits:
+      storage: 50Gi
+
+  # Route for AAP UI and REST API access
+  route_tls_termination_mechanism: Edge
+
+  # Execution environments — use default EE which has kubernetes.core collection
+  execution_environment_pull_policy: IfNotPresent

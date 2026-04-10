@@ -1,0 +1,193 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Red Hat Display', 'Segoe UI', system-ui, sans-serif;
+  background: #0f1117;
+  color: #e2e8f0;
+  min-height: 100vh;
+}
+
+/* Layout */
+.dashboard {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: auto;
+  gap: 12px;
+  padding: 12px;
+  min-height: 100vh;
+}
+
+/* Panel base */
+.panel {
+  background: #1a1d27;
+  border: 1px solid #2d3748;
+  border-radius: 8px;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #a0aec0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.panel-header svg { width: 16px; height: 16px; }
+
+/* Header bar */
+.topbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #1a1d27;
+  border: 1px solid #2d3748;
+  border-radius: 8px;
+  padding: 12px 20px;
+}
+
+.topbar-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #e2e8f0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.topbar-title span { color: #e53e3e; }
+
+.status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #48bb78;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Panel sizing */
+.panel-site-map     { grid-column: 1; grid-row: 2 / 4; }
+.panel-predictions  { grid-column: 2; grid-row: 2; }
+.panel-agent        { grid-column: 3; grid-row: 2 / 4; }
+.panel-cache        { grid-column: 2; grid-row: 3; }
+.panel-qoe          { grid-column: 1; grid-row: 4; }
+.panel-kpis         { grid-column: 2; grid-row: 4; }
+.panel-ai-health    { grid-column: 3; grid-row: 4; }
+
+/* Metric display */
+.metric { margin-bottom: 10px; }
+.metric-label { font-size: 11px; color: #718096; margin-bottom: 2px; }
+.metric-value { font-size: 22px; font-weight: 700; color: #e2e8f0; }
+.metric-value.green  { color: #48bb78; }
+.metric-value.yellow { color: #ecc94b; }
+.metric-value.red    { color: #fc8181; }
+.metric-value.blue   { color: #63b3ed; }
+
+/* Progress bar */
+.progress-bar {
+  height: 6px;
+  background: #2d3748;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+/* Prediction feed items */
+.prediction-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px;
+  background: #252836;
+  border-radius: 4px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.confidence-badge {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 11px;
+}
+.confidence-high   { background: #1c4532; color: #48bb78; }
+.confidence-medium { background: #44371a; color: #ecc94b; }
+
+/* Agent node graph */
+.node-graph {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: #252836;
+  border: 1px solid transparent;
+  transition: all 0.3s ease;
+}
+.agent-node.active  { border-color: #63b3ed; background: #1a2a3d; color: #63b3ed; }
+.agent-node.done    { border-color: #48bb78; background: #1a3028; color: #48bb78; }
+.agent-node.pending { color: #4a5568; }
+
+/* Approval buttons */
+.approval-card {
+  background: #252836;
+  border: 1px solid #e53e3e;
+  border-radius: 6px;
+  padding: 10px;
+  margin-top: 8px;
+}
+.approval-actions { display: flex; gap: 8px; margin-top: 8px; }
+.btn {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.btn:hover { opacity: 0.85; }
+.btn-approve { background: #276749; color: #fff; }
+.btn-reject  { background: #9b2c2c; color: #fff; }
+
+/* Scrollable lists */
+.scrollable { overflow-y: auto; max-height: 180px; }
+.scrollable::-webkit-scrollbar { width: 4px; }
+.scrollable::-webkit-scrollbar-track { background: #1a1d27; }
+.scrollable::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 2px; }
+
+/* KPI grid */
+.kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* Connection status */
+.conn-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #718096;
+}
+.conn-dot { width: 6px; height: 6px; border-radius: 50%; }
+.conn-dot.connected    { background: #48bb78; }
+.conn-dot.disconnected { background: #fc8181; }

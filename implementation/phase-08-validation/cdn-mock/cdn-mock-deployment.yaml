@@ -1,0 +1,107 @@
+---
+# CDN Mock — Deployment
+# Namespace: mec-content-ai (near-edge)
+# Simulates CDN origin for the pre-fetch demo
+# SCC: restricted-v2
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cdn-mock
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: cdn-mock
+    app.kubernetes.io/part-of: mec-content-ai
+    mec.component: demo
+  annotations:
+    mec.demo-note: >
+      Replace content_url in prefetch-content.yml with real CDN endpoint in production.
+      This pod serves Big Buck Bunny HLS segments as a stand-in for Netflix/ESPN content.
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cdn-mock
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cdn-mock
+        app.kubernetes.io/part-of: mec-content-ai
+        mec.component: demo
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nginx
+          image: registry.redhat.io/rhel9/nginx-124:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: cdn-data
+              mountPath: /usr/share/nginx/html
+              readOnly: true
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: cdn-mock-nginx-config
+        - name: cdn-data
+          persistentVolumeClaim:
+            claimName: cdn-mock-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cdn-mock
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: cdn-mock
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  selector:
+    app.kubernetes.io/name: cdn-mock
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# Route — for browser-based demo player access
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: cdn-mock
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: cdn-mock
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  to:
+    kind: Service
+    name: cdn-mock
+  port:
+    targetPort: http
+  tls:
+    termination: Edge
+    insecureEdgeTerminationPolicy: Redirect

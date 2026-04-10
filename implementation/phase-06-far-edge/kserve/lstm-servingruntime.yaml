@@ -1,0 +1,71 @@
+---
+# LSTM Demand Predictor — Model Server (Deployment, not KServe InferenceService)
+# Namespace: far-edge-mec (SNO far-edge node, CPU only)
+# Lightweight Python FastAPI server with KServe-compatible REST API.
+# Model stored in MinIO (near-edge) — pulled at pod startup via S3 protocol.
+# No RHOAI/KServe installation required on far-edge SNO nodes.
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: lstm-runtime
+  namespace: far-edge-mec
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  supportedModelFormats:
+    - name: lstm-onnx
+      version: "1"
+      autoSelect: true
+
+  # CPU-only inference — no GPU annotation needed
+  containers:
+    - name: kserve-container
+      image: registry.access.redhat.com/ubi9/python-311:latest
+      command:
+        - /bin/sh
+        - -c
+        - |
+          pip install --quiet onnxruntime numpy fastapi uvicorn boto3 && \
+          python3 /app/lstm_server.py
+      args: []
+      resources:
+        requests:
+          cpu: 200m
+          memory: 256Mi
+        limits:
+          cpu: "1"
+          memory: 512Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        capabilities:
+          drop:
+            - ALL
+      env:
+        - name: MODEL_NAME
+          value: lstm-demand
+        - name: MINIO_ENDPOINT
+          value: "http://minio.mec-ai-data.svc.cluster.local:9000"
+        - name: MINIO_BUCKET
+          value: mec-models
+        - name: MINIO_MODEL_PATH
+          value: lstm-demand/latest/model.onnx
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-far-edge-secret
+              key: access-key
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-far-edge-secret
+              key: secret-key
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+      readinessProbe:
+        httpGet:
+          path: /v1/models/lstm-demand
+          port: 8080
+        initialDelaySeconds: 30
+        periodSeconds: 15

@@ -1,0 +1,122 @@
+---
+# Cache Manager — Deployment
+# Namespace: far-edge-mec (SNO far-edge node)
+# Two containers:
+#   nginx       — serves pre-fetched video segments from /var/mec-cache
+#   cache-reporter — sidecar that scans cache and publishes cache.state to Kafka
+# SCC: restricted-v2
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cache-manager
+  namespace: far-edge-mec
+  labels:
+    app.kubernetes.io/name: cache-manager
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cache-manager
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cache-manager
+        app.kubernetes.io/part-of: mec-content-ai
+    spec:
+      serviceAccountName: cache-manager-sa
+
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+
+        # ── Nginx — video segment cache server ────────────────────────────────
+        - name: nginx
+          image: registry.redhat.io/rhel9/nginx-124:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: mec-cache
+              mountPath: /var/mec-cache
+
+        # ── Cache Reporter — publishes cache.state to Kafka ───────────────────
+        - name: cache-reporter
+          image: registry.access.redhat.com/ubi9/python-311:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              pip install --quiet confluent-kafka && python3 /app/cache-reporter.py
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: KAFKA_BOOTSTRAP
+              value: "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092"
+            - name: MEC_SITE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['mec-site-id']
+            - name: CACHE_BASE_PATH
+              value: /var/mec-cache
+            - name: REPORT_INTERVAL_SECONDS
+              value: "30"
+            - name: TOTAL_CACHE_GB
+              value: "20"              # matches PVC size
+          volumeMounts:
+            - name: mec-cache
+              mountPath: /var/mec-cache
+              readOnly: true
+            - name: nginx-config
+              mountPath: /app/cache-reporter.py
+              subPath: cache-reporter.py
+
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: cache-manager-nginx-config
+        - name: mec-cache
+          persistentVolumeClaim:
+            claimName: mec-cache-pvc

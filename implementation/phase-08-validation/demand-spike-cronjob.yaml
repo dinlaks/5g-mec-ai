@@ -1,0 +1,114 @@
+---
+# Demand Spike Simulator — CronJob
+# Namespace: mec-content-ai (near-edge)
+# Publishes realistic demand prediction events to Kafka demand.predictions
+# on a 5-minute schedule to keep the demo pipeline active.
+#
+# Simulates what the far-edge LSTM model would publish during an event spike.
+# Alternates between confidence levels to demonstrate both:
+#   - EDA auto-trigger path (confidence >= 0.95)
+#   - LangGraph agent path (confidence 0.85–0.94)
+#
+# To trigger immediately (one-shot):
+#   oc create job demand-spike-now --from=cronjob/demand-spike-simulator -n mec-content-ai
+#
+# Production note: remove this CronJob — real LSTM predictions replace it
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: demand-spike-simulator
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: demand-spike-simulator
+    app.kubernetes.io/part-of: mec-content-ai
+    mec.component: demo
+spec:
+  schedule: "*/5 * * * *"        # every 5 minutes
+  concurrencyPolicy: Forbid       # don't overlap runs
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: demand-spike-simulator
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: spike-publisher
+              image: registry.access.redhat.com/ubi9/python-311:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  pip install --quiet confluent-kafka && python3 - << 'PYEOF'
+                  import json, random, os
+                  from datetime import datetime, timedelta, timezone
+                  from confluent_kafka import Producer
+
+                  KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP",
+                    "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092")
+                  CDN_MOCK_URL = os.getenv("CDN_MOCK_URL",
+                    "http://cdn-mock.mec-content-ai.svc.cluster.local:8080")
+
+                  producer = Producer({"bootstrap.servers": KAFKA_BOOTSTRAP})
+
+                  sites = ["mec-stadium-01", "mec-stadium-02"]
+                  events = [
+                      {"content_id": "nfl-game",      "event_type": "live_sport",   "viewers_base": 45000},
+                      {"content_id": "nba-game",      "event_type": "live_sport",   "viewers_base": 30000},
+                      {"content_id": "live-concert",  "event_type": "live_concert", "viewers_base": 25000},
+                      {"content_id": "vod-premiere",  "event_type": "vod_premiere", "viewers_base": 15000},
+                  ]
+
+                  # Alternate: high confidence (EDA path) and medium (agent path)
+                  run_count = int(open("/tmp/run_count").read()) if os.path.exists("/tmp/run_count") else 0
+                  confidence = 0.97 if run_count % 2 == 0 else round(random.uniform(0.85, 0.93), 2)
+
+                  for site in sites:
+                      event = random.choice(events)
+                      viewers = int(event["viewers_base"] * random.uniform(0.8, 1.3))
+                      peak_in = random.randint(10, 30)
+                      start_utc = (datetime.now(timezone.utc) + timedelta(minutes=peak_in)).isoformat()
+
+                      payload = {
+                          "mec_site_id":               site,
+                          "content_id":                event["content_id"],
+                          "content_url":               f"{CDN_MOCK_URL}/{event['content_id']}",
+                          "predicted_viewers":          viewers,
+                          "event_type":                event["event_type"],
+                          "event_start_utc":            start_utc,
+                          "confidence":                confidence,
+                          "predicted_peak_in_minutes":  peak_in,
+                      }
+                      producer.produce("demand.predictions", json.dumps(payload).encode())
+                      print(f"Published: {site} | {event['content_id']} | {viewers:,} viewers | conf={confidence}")
+
+                  producer.flush()
+                  print(f"Done. Confidence level: {'HIGH (EDA auto)' if confidence >= 0.95 else 'MEDIUM (agent path)'}")
+
+                  with open("/tmp/run_count", "w") as f:
+                      f.write(str(run_count + 1))
+                  PYEOF
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop: [ALL]
+              env:
+                - name: KAFKA_BOOTSTRAP
+                  value: "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092"
+                - name: CDN_MOCK_URL
+                  value: "http://cdn-mock.mec-content-ai.svc.cluster.local:8080"

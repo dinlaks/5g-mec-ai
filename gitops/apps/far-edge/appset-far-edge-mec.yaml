@@ -1,0 +1,61 @@
+---
+# ApplicationSet — Far Edge MEC Workloads
+# Deploys far-edge modules to EVERY MEC node registered with ACM
+# Each MEC node gets: KServe LSTM + ABR engine + cache manager + telemetry collector
+# ACM Placement (placement-far-edge-mec) determines which clusters are targeted
+# When a new MEC node is registered with ACM and labelled, it gets workloads automatically
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: far-edge-mec-workloads
+  namespace: openshift-gitops
+spec:
+  # Pull cluster list from ACM Placement decision
+  generators:
+    - clusterDecisionResource:
+        configMapRef: acm-placement
+        labelSelector:
+          matchLabels:
+            cluster.open-cluster-management.io/placement: placement-far-edge-mec
+        requeueAfterSeconds: 180
+  template:
+    metadata:
+      name: "far-edge-{{name}}"
+      labels:
+        app.kubernetes.io/part-of: mec-content-ai
+        tier: far-edge
+        mec-site: "{{metadata.labels.mec-site-id}}"
+    spec:
+      project: mec-content-ai
+      source:
+        repoURL: https://github.com/<YOUR_ORG>/5g-mec-ai.git
+        targetRevision: main
+        path: implementation/phase-06-far-edge
+        # Kustomize overlay per site type (stadium vs cell-site vs venue)
+        kustomize:
+          namePrefix: "{{name}}-"
+          commonLabels:
+            mec-site-id: "{{metadata.labels.mec-site-id}}"
+            venue-type: "{{metadata.labels.venue-type}}"
+      destination:
+        server: "{{server}}"
+        namespace: far-edge-mec
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 5m
+      ignoreDifferences:
+        # KServe model state managed by RHOAI controller
+        - group: serving.kserve.io
+          kind: InferenceService
+          jsonPointers:
+            - /status

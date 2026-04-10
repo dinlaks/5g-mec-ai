@@ -1,0 +1,20 @@
+---
+# ManagedClusterSetBinding — near-edge
+# Binds near-edge cluster set to openshift-gitops namespace
+# Required for GitOpsCluster to register clusters with ArgoCD
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: near-edge-clusters
+  namespace: openshift-gitops
+spec:
+  clusterSet: near-edge-clusters
+---
+# ManagedClusterSetBinding — far-edge
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: far-edge-mec-clusters
+  namespace: openshift-gitops
+spec:
+  clusterSet: far-edge-mec-clusters

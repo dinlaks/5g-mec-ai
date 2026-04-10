@@ -1,0 +1,11 @@
+---
+# far-edge-mec namespace
+# Created on SNO far-edge node by ACM ApplicationSet (CreateNamespace=true in syncOptions)
+# All far-edge workloads run here
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: far-edge-mec
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+    tier: far-edge

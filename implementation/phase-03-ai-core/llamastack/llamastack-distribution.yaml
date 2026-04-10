@@ -1,0 +1,49 @@
+---
+# LlamaStack Distribution — LlamaStackDistribution CRD
+# API: llamastack.io/v1alpha1
+# Managed by: llama-stack-k8s-operator (ships with RHOAI 3.3 — no separate install needed)
+# Version: 0.4.2 (RHOAI 3.3 / ODH 3.3 ships with 0.4.2.1+rhai0)
+# Namespace: mec-content-ai
+#
+# This CR tells the RHOAI-managed LlamaStack operator to deploy a LlamaStack
+# instance that uses our vLLM InferenceService as the inference backend.
+# The operator manages the pod lifecycle — we do NOT deploy a Deployment manually.
+#
+# ⚠️  Update vllm-url AFTER the vLLM InferenceService is Ready (Step 3 in COMMANDS.md)
+#     Get URL: oc get inferenceservice llama-3-1-8b-instruct \
+#               -n redhat-ods-applications \
+#               -o jsonpath='{.status.url}'
+apiVersion: llamastack.io/v1alpha1
+kind: LlamaStackDistribution
+metadata:
+  name: mec-llamastack
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  replicas: 1
+  server:
+    # remote-vllm distribution — LlamaStack backed by a remote vLLM endpoint
+    distribution:
+      name: remote-vllm
+    containerSpec:
+      env:
+        # vLLM InferenceService URL (KServe — RHOAI managed)
+        # Update after InferenceService is Ready in Phase 03 Step 3
+        - name: VLLM_URL
+          value: "https://llama-3-1-8b-instruct-predictor-redhat-ods-applications.apps.<your-cluster>"
+        # Model name as registered in vLLM
+        - name: INFERENCE_MODEL
+          value: "llama-3-1-8b-instruct"
+        # Langfuse OTLP endpoint — LlamaStack sends traces here
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "https://langfuse.apps.<your-cluster>/api/otlp/v1/traces"
+        - name: OTEL_SERVICE_NAME
+          value: "mec-llamastack"
+        # TLS — internal cluster traffic
+        - name: SSL_VERIFY
+          value: "false"
+    # Persistent storage for LlamaStack state (agent memory, session data)
+    storage:
+      size: "5Gi"
+      mountPath: "/home/lls/.lls"

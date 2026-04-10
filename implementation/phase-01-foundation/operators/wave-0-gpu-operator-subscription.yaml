@@ -1,0 +1,58 @@
+---
+# Wave 0 — NVIDIA GPU Operator
+# Requires: NFD already running and labelling nodes
+# Installs GPU drivers, device plugin, and monitoring on GPU nodes
+# Near-edge cluster needs GPU for vLLM (Llama 3.1 8B Instruct)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gpu-operator
+  labels:
+    openshift.io/cluster-monitoring: "true"
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator
+spec:
+  targetNamespaces:
+    - gpu-operator
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: gpu-operator-certified
+  namespace: gpu-operator
+spec:
+  channel: v24.9
+  installPlanApproval: Automatic
+  name: gpu-operator-certified
+  source: certified-operators
+  sourceNamespace: openshift-marketplace
+---
+# ClusterPolicy — GPU Operator configuration
+# Enables: driver, device plugin, DCGM monitoring, MIG (if needed)
+apiVersion: nvidia.com/v1
+kind: ClusterPolicy
+metadata:
+  name: gpu-cluster-policy
+spec:
+  operator:
+    defaultRuntime: crio
+  driver:
+    enabled: true
+    useOpenKernelModules: true   # use open-source kernel modules (OCP 4.21+)
+  devicePlugin:
+    enabled: true
+  dcgmExporter:
+    enabled: true
+  toolkit:
+    enabled: true
+  validator:
+    plugin:
+      env:
+        - name: WITH_WORKLOAD
+          value: "true"
+  mig:
+    strategy: none               # set to 'single' or 'mixed' if using MIG

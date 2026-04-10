@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Namespace applied to all resources (overridden by ApplicationSet destination)
+namespace: far-edge-mec
+
+# All far-edge resources
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  # Telemetry Collector — publishes raw telemetry to near-edge Kafka
+  - telemetry-collector/configmap.yaml
+  - telemetry-collector/deployment.yaml
+  # Demand Predictor — reads Kafka, calls LSTM, publishes demand.predictions
+  - demand-predictor/configmap.yaml
+  - demand-predictor/deployment.yaml
+  # KServe — LSTM demand model + ABR policy engine model servers
+  - kserve/lstm-servingruntime.yaml
+  - kserve/lstm-inferenceservice.yaml
+  - kserve/abr-servingruntime.yaml
+  - kserve/abr-inferenceservice.yaml
+  # Cache Manager — Nginx serving pre-fetched video segments
+  - cache-manager/pvc.yaml
+  - cache-manager/nginx-configmap.yaml
+  - cache-manager/abr-policy-configmap.yaml
+  - cache-manager/deployment.yaml
+  - cache-manager/service.yaml
+  # EDA Receiver — listens for AAP job triggers from near-edge
+  - eda-receiver/deployment.yaml
+
+# Common labels applied to all resources by ACM ApplicationSet
+# (mec-site-id and venue-type are injected by ApplicationSet template)
+commonLabels:
+  app.kubernetes.io/part-of: mec-content-ai
+  tier: far-edge

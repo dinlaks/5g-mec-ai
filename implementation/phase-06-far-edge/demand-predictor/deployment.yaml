@@ -1,0 +1,76 @@
+---
+# Demand Predictor — Deployment
+# Namespace: far-edge-mec (on SNO far-edge node)
+# Reads Kafka telemetry → calls KServe LSTM → publishes demand.predictions
+# SCC: restricted-v2
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demand-predictor
+  namespace: far-edge-mec
+  labels:
+    app.kubernetes.io/name: demand-predictor
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: demand-predictor
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: demand-predictor
+        app.kubernetes.io/part-of: mec-content-ai
+    spec:
+      serviceAccountName: demand-predictor-sa
+
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: predictor
+          image: registry.access.redhat.com/ubi9/python-311:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              pip install --quiet confluent-kafka httpx && python3 /app/predictor.py
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: KAFKA_BOOTSTRAP
+              value: "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092"
+            - name: MEC_SITE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['mec-site-id']
+            - name: KSERVE_LSTM_ENDPOINT
+              value: "http://lstm-demand-predictor.far-edge-mec.svc.cluster.local/v1/models/lstm-demand:predict"
+            - name: PREDICTION_INTERVAL_SECONDS
+              value: "30"
+            - name: MIN_CONFIDENCE_THRESHOLD
+              value: "0.75"
+            - name: TELEMETRY_WINDOW_SIZE
+              value: "10"
+          volumeMounts:
+            - name: script
+              mountPath: /app
+
+      volumes:
+        - name: script
+          configMap:
+            name: demand-predictor-script
+            defaultMode: 0755

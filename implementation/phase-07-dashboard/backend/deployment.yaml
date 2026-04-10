@@ -1,0 +1,114 @@
+---
+# EdgeStream IQ Backend — Deployment
+# SCC: restricted-v2
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edgestream-iq-backend
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: edgestream-iq-backend
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: edgestream-iq-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: edgestream-iq-backend
+        app.kubernetes.io/part-of: mec-content-ai
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: backend
+          image: image-registry.openshift-image-registry.svc:5000/mec-content-ai/edgestream-iq-backend:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: KAFKA_BOOTSTRAP
+              value: "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092"
+            - name: AGENT_API_URL
+              value: "http://content-intelligence-agent.mec-content-ai.svc.cluster.local:8080"
+            - name: LANGFUSE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: edgestream-iq-secret
+                  key: langfuse-host
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: edgestream-iq-secret
+                  key: langfuse-public-key
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: edgestream-iq-secret
+                  key: langfuse-secret-key
+            - name: AAP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: edgestream-iq-secret
+                  key: aap-host
+            - name: AAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: edgestream-iq-secret
+                  key: aap-token
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: edgestream-iq-backend
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: edgestream-iq-backend
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  selector:
+    app.kubernetes.io/name: edgestream-iq-backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: edgestream-iq-backend
+  namespace: mec-content-ai
+  labels:
+    app.kubernetes.io/name: edgestream-iq-backend
+    app.kubernetes.io/part-of: mec-content-ai
+spec:
+  to:
+    kind: Service
+    name: edgestream-iq-backend
+  port:
+    targetPort: http
+  tls:
+    termination: Edge
+    insecureEdgeTerminationPolicy: Redirect

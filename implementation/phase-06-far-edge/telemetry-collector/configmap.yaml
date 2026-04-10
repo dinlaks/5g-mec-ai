@@ -1,0 +1,150 @@
+---
+# Telemetry Collector — Python script embedded in ConfigMap
+# In production: replace mock data generation with real UPF gNB interface taps
+# For AWS PoC: generates realistic synthetic telemetry to drive the full pipeline
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: telemetry-collector-script
+  namespace: far-edge-mec
+  labels:
+    app.kubernetes.io/name: telemetry-collector
+    app.kubernetes.io/part-of: mec-content-ai
+data:
+  collector.py: |
+    #!/usr/bin/env python3
+    """
+    Telemetry Collector — MEC Far Edge
+    Simulates UPF telemetry tap and publishes to near-edge Kafka every 30 seconds.
+
+    Publishes to:
+      content.requests.live  — content request patterns + top content IDs
+      ue.density.live        — active UE count + tier breakdown
+      network.capacity.live  — backhaul capacity + utilisation
+
+    In production: replace generate_* functions with real UPF/gNB API calls.
+    """
+
+    import json
+    import os
+    import random
+    import time
+    import logging
+    from datetime import datetime, timezone
+
+    from confluent_kafka import Producer, KafkaException
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] telemetry-collector — %(message)s"
+    )
+    log = logging.getLogger(__name__)
+
+    # ── Config ────────────────────────────────────────────────────────────────
+    KAFKA_BOOTSTRAP    = os.getenv("KAFKA_BOOTSTRAP", "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092")
+    MEC_SITE_ID        = os.getenv("MEC_SITE_ID", "mec-stadium-01")
+    PUBLISH_INTERVAL   = int(os.getenv("PUBLISH_INTERVAL_SECONDS", "30"))
+    BASE_UE_COUNT      = int(os.getenv("BASE_UE_COUNT", "5000"))
+    BACKHAUL_CAPACITY  = int(os.getenv("BACKHAUL_CAPACITY_MBPS", "2000"))
+    VENUE_TYPE         = os.getenv("VENUE_TYPE", "stadium")
+
+    # Top content IDs — simulate what subscribers are watching at this site
+    CONTENT_CATALOG = [
+        "nfl-game",
+        "nba-game",
+        "live-concert",
+        "vod-popular-01",
+        "vod-popular-02",
+        "live-news",
+    ]
+
+    producer = Producer({
+        "bootstrap.servers": KAFKA_BOOTSTRAP,
+        "client.id": f"telemetry-collector-{MEC_SITE_ID}",
+        "retries": 5,
+        "retry.backoff.ms": 2000,
+    })
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def time_of_day_factor() -> float:
+        """Returns a multiplier based on time of day — simulates subscriber activity patterns."""
+        hour = datetime.now().hour
+        if 18 <= hour <= 22:   return 1.8   # peak evening (NFL games, concerts)
+        elif 20 <= hour <= 23: return 2.0   # weekend peak
+        elif 12 <= hour <= 14: return 1.3   # lunch
+        elif 0 <= hour <= 6:   return 0.25  # night — very low
+        elif 7 <= hour <= 9:   return 0.8   # morning commute
+        return 1.0
+
+    def weighted_content_ids(active_ues: int) -> list:
+        """Returns top content IDs based on simulated demand."""
+        top_n = min(3, len(CONTENT_CATALOG))
+        return random.sample(CONTENT_CATALOG, top_n)
+
+    def publish(topic: str, payload: dict):
+        payload["mec_site_id"] = MEC_SITE_ID
+        payload["venue_type"]  = VENUE_TYPE
+        payload["timestamp"]   = datetime.now(timezone.utc).isoformat()
+        producer.produce(topic, json.dumps(payload).encode("utf-8"))
+        producer.poll(0)
+
+    # ── Main loop ─────────────────────────────────────────────────────────────
+
+    def run():
+        log.info(f"Starting telemetry collector for {MEC_SITE_ID} (venue: {VENUE_TYPE})")
+        log.info(f"Kafka: {KAFKA_BOOTSTRAP} | Interval: {PUBLISH_INTERVAL}s | Base UEs: {BASE_UE_COUNT}")
+
+        while True:
+            try:
+                factor = time_of_day_factor()
+                noise  = random.uniform(0.90, 1.10)
+
+                active_ues    = int(BASE_UE_COUNT * factor * noise)
+                premium_ues   = int(active_ues * 0.15)
+                standard_ues  = active_ues - premium_ues
+                utilization   = min(95, int(35 + (factor * 32 * noise)))
+                headroom_mbps = int(BACKHAUL_CAPACITY * (1 - utilization / 100))
+
+                top_content   = weighted_content_ids(active_ues)
+
+                # ── Publish content.requests.live ─────────────────────────
+                publish("content.requests.live", {
+                    "active_ues":              active_ues,
+                    "video_requests_per_sec":  int(active_ues * 0.28 * noise),
+                    "top_content_ids":         top_content,
+                    "live_stream_active":      any(c.startswith("nfl") or c.startswith("live") for c in top_content),
+                })
+
+                # ── Publish ue.density.live ───────────────────────────────
+                publish("ue.density.live", {
+                    "active_ues":   active_ues,
+                    "premium_ues":  premium_ues,
+                    "standard_ues": standard_ues,
+                    "peak_factor":  round(factor, 2),
+                })
+
+                # ── Publish network.capacity.live ─────────────────────────
+                publish("network.capacity.live", {
+                    "backhaul_capacity_mbps":   BACKHAUL_CAPACITY,
+                    "backhaul_utilization_pct": utilization,
+                    "backhaul_headroom_mbps":   headroom_mbps,
+                    "cache_hit_rate_pct":       random.uniform(10, 20),  # low before pre-caching
+                })
+
+                producer.flush()
+                log.info(
+                    f"Published telemetry — UEs: {active_ues} "
+                    f"(peak×{factor:.1f}), backhaul: {utilization}%, "
+                    f"top content: {top_content}"
+                )
+
+            except KafkaException as e:
+                log.error(f"Kafka error: {e} — retrying in {PUBLISH_INTERVAL}s")
+            except Exception as e:
+                log.error(f"Unexpected error: {e}")
+
+            time.sleep(PUBLISH_INTERVAL)
+
+    if __name__ == "__main__":
+        run()
