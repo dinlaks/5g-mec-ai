@@ -13,7 +13,7 @@ metadata:
 spec:
   project: mec-content-ai
   source:
-    repoURL: https://github.com/<YOUR_ORG>/5g-mec-ai.git
+    repoURL: https://github.com/dinlaks/5g-mec-ai.git
     targetRevision: main
     path: implementation/phase-04-automation
   destination:

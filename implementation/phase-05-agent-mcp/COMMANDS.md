@@ -73,7 +73,7 @@ oc apply -f implementation/phase-05-agent-mcp/rbac.yaml
 
 ```bash
 # Set your Git repo URL
-export GIT_REPO_URL="https://github.com/<your-org>/5g-mec-ai.git"
+export GIT_REPO_URL="https://github.com/dinlaks/5g-mec-ai.git"
 
 # Patch agent BuildConfig
 oc patch buildconfig content-intelligence-agent -n mec-content-ai \

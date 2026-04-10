@@ -26,7 +26,7 @@ After that: commit to Git → ArgoCD syncs → clusters update.
 
 ```bash
 # 1. Clone repo
-git clone https://github.com/<your-org>/5g-mec-ai.git
+git clone https://github.com/dinlaks/5g-mec-ai.git
 cd 5g-mec-ai
 
 # 2. Configure near-edge environment

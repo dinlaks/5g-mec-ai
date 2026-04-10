@@ -117,7 +117,7 @@ success "Logged in: $(oc whoami) @ $(oc whoami --show-server)"
 
 if [[ -z "${GIT_REPO_URL:-}" ]] && [[ "$VALIDATE_ONLY" != true ]]; then
   error "GIT_REPO_URL is not set in env.sh — required for Phase 05 BuildConfigs"
-  error "Set it: export GIT_REPO_URL='https://github.com/<your-org>/5g-mec-ai.git'"
+  error "Set it: export GIT_REPO_URL='https://github.com/dinlaks/5g-mec-ai.git'"
   exit 1
 fi
 

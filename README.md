@@ -97,7 +97,7 @@ kubectl     # Optional
 
 ```bash
 # 1. Clone this repository
-git clone https://github.com/<your-org>/5g-mec-ai.git
+git clone https://github.com/dinlaks/5g-mec-ai.git
 cd 5g-mec-ai
 
 # 2. Configure environment
