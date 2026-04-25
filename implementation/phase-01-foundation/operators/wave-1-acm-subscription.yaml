@@ -29,24 +29,3 @@ spec:
   name: advanced-cluster-management
   source: redhat-operators
   sourceNamespace: openshift-marketplace
----
-# MultiClusterHub — ACM control plane
-# Enables: cluster management, application lifecycle, GitOps integration, policy engine
-apiVersion: operator.open-cluster-management.io/v1
-kind: MultiClusterHub
-metadata:
-  name: multiclusterhub
-  namespace: open-cluster-management
-spec:
-  availabilityConfig: Basic    # use High for production multi-replica
-  disableHubSelfManagement: false
-  overrides:
-    components:
-      - name: app-lifecycle
-        enabled: true
-      - name: cluster-lifecycle
-        enabled: true
-      - name: grc
-        enabled: true          # governance / policy engine
-      - name: multicluster-engine
-        enabled: true

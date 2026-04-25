@@ -1,0 +1,16 @@
+---
+# Wave 1 — Red Hat OpenShift Service Mesh 3.x (Sail Operator)
+# Required by RHOAI 3.x (KServe uses Istio for traffic management)
+# OSSM 3.x is based on the Sail Operator — different package from OSSM 2.x
+# Install BEFORE RHOAI subscription
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: servicemeshoperator3
+  namespace: openshift-operators
+spec:
+  channel: stable
+  installPlanApproval: Automatic
+  name: servicemeshoperator3
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace

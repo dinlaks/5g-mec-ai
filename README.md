@@ -109,7 +109,7 @@ cp configs/far-edge/env.sh.example configs/far-edge/env.sh
 source configs/near-edge/env.sh
 
 # 4. Run pre-flight checks
-./scripts/preflight.sh
+./scripts/phase-01-deploy.sh --validate
 
 # 5. Follow implementation phases in order
 # See: docs/deployment/START-HERE.md

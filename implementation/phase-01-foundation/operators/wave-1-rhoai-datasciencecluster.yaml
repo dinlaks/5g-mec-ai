@@ -1,0 +1,21 @@
+# DataScienceCluster — applied AFTER DSCInitialization and RHOAI operator CSV reaches Succeeded
+# RHOAI 3.x: component-level managementState removed — include component to enable, omit to disable
+apiVersion: datasciencecluster.opendatahub.io/v1
+kind: DataScienceCluster
+metadata:
+  name: default-dsc
+spec:
+  components:
+    kserve:
+      serving:
+        managementState: Managed
+        name: knative-serving
+        ingressGateway:
+          certificate:
+            type: OpenshiftDefaultIngress
+    dashboard: {}
+    workbenches: {}
+    datasciencepipelines: {}
+    kueue: {}
+    codeflare: {}
+    modelcontroller: {}

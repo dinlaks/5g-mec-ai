@@ -33,7 +33,7 @@ Everything after this phase is deployed via ArgoCD — not manual `oc apply`.
 ## Prerequisites
 ```bash
 source configs/near-edge/env.sh
-./scripts/preflight.sh   # must pass before proceeding
+./scripts/phase-01-deploy.sh --validate   # must pass before proceeding
 ```
 
 ## Step-by-Step

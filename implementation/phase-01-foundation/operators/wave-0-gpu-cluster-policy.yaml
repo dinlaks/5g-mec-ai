@@ -1,0 +1,35 @@
+# ClusterPolicy — applied AFTER GPU operator CSV reaches Succeeded
+# wave-0-gpu-operator-subscription.yaml must be applied and operator ready first
+apiVersion: nvidia.com/v1
+kind: ClusterPolicy
+metadata:
+  name: gpu-cluster-policy
+spec:
+  operator:
+    defaultRuntime: crio
+  daemonsets:
+    rollingUpdate:
+      maxUnavailable: "1"
+    updateStrategy: RollingUpdate
+  driver:
+    enabled: true
+    useOpenKernelModules: true
+  toolkit:
+    enabled: true
+  devicePlugin:
+    enabled: true
+  dcgm:
+    enabled: true
+  dcgmExporter:
+    enabled: true
+  gfd:
+    enabled: true
+  nodeStatusExporter:
+    enabled: true
+  validator:
+    plugin:
+      env:
+        - name: WITH_WORKLOAD
+          value: "true"
+  mig:
+    strategy: none

@@ -39,8 +39,8 @@ source configs/near-edge/env.sh
 # 4. Login to near-edge cluster
 oc login $NEAR_EDGE_API --token=$NEAR_EDGE_TOKEN
 
-# 5. Run preflight
-./scripts/preflight.sh
+# 5. Validate login and pre-checks
+./scripts/phase-01-deploy.sh --validate
 # Fix any failures before proceeding
 ```
 
@@ -69,7 +69,7 @@ Command log: [`implementation/phase-01-foundation/COMMANDS.md`](../../implementa
 ```bash
 # Quick reference — run in order:
 source configs/near-edge/env.sh
-./scripts/preflight.sh
+./scripts/phase-01-deploy.sh --validate
 
 # Wave 0
 oc apply -f implementation/phase-01-foundation/operators/wave-0-certmanager-subscription.yaml

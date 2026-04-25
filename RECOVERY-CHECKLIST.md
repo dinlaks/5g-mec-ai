@@ -12,7 +12,7 @@ Work through each section top to bottom. Do not skip steps.
 - [ ] Far-edge env sourced: `source configs/far-edge/env.sh`
 - [ ] Pull secret present: `ls configs/near-edge/pull-secret.json`
 - [ ] Slack bot token set: `echo $SLACK_BOT_TOKEN`
-- [ ] Ran preflight: `./scripts/preflight.sh`
+- [ ] Ran preflight: `./scripts/phase-01-deploy.sh --validate`
 - [ ] Ran dry-run: `./scripts/deploy-dry-run.sh`
 
 ---

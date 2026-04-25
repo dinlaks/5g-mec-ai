@@ -1,0 +1,20 @@
+# MultiClusterHub — applied AFTER ACM operator CSV reaches Succeeded
+# wave-1-acm-subscription.yaml must be applied and operator ready first
+apiVersion: operator.open-cluster-management.io/v1
+kind: MultiClusterHub
+metadata:
+  name: multiclusterhub
+  namespace: open-cluster-management
+spec:
+  availabilityConfig: Basic    # use High for production multi-replica
+  disableHubSelfManagement: false
+  overrides:
+    components:
+      - name: app-lifecycle
+        enabled: true
+      - name: cluster-lifecycle
+        enabled: true
+      - name: grc
+        enabled: true          # governance / policy engine
+      - name: multicluster-engine
+        enabled: true

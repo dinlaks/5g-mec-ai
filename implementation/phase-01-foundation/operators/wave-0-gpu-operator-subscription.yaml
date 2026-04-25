@@ -30,29 +30,3 @@ spec:
   name: gpu-operator-certified
   source: certified-operators
   sourceNamespace: openshift-marketplace
----
-# ClusterPolicy — GPU Operator configuration
-# Enables: driver, device plugin, DCGM monitoring, MIG (if needed)
-apiVersion: nvidia.com/v1
-kind: ClusterPolicy
-metadata:
-  name: gpu-cluster-policy
-spec:
-  operator:
-    defaultRuntime: crio
-  driver:
-    enabled: true
-    useOpenKernelModules: true   # use open-source kernel modules (OCP 4.21+)
-  devicePlugin:
-    enabled: true
-  dcgmExporter:
-    enabled: true
-  toolkit:
-    enabled: true
-  validator:
-    plugin:
-      env:
-        - name: WITH_WORKLOAD
-          value: "true"
-  mig:
-    strategy: none               # set to 'single' or 'mixed' if using MIG

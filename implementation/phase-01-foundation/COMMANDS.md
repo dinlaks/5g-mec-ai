@@ -12,7 +12,7 @@ Update "Actual Output" and "Status" as you run each command.
 | `oc version` | Confirm OCP CLI version matches cluster | `Client: 4.21.x` | | ⬜ |
 | `oc whoami` | Confirm logged into near-edge cluster as cluster-admin | `system:admin` or your user | | ⬜ |
 | `oc get nodes` | Check all nodes Ready | All nodes `Ready` | | ⬜ |
-| `./scripts/preflight.sh` | Full pre-flight check | `All checks passed` | | ⬜ |
+| `./scripts/phase-01-deploy.sh --validate` | Pre-flight check (login + cluster access) | `Validate-only — done.` | | ⬜ |
 
 ---
 

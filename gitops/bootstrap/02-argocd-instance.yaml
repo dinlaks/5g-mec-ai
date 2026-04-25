@@ -42,6 +42,10 @@ spec:
     - redhat-ods-applications
     - aap
     - amq-streams
+  sso:
+    provider: dex
+    dex:
+      openShiftOAuth: true
   rbac:
     defaultPolicy: role:readonly
     policy: |
@@ -49,4 +53,5 @@ spec:
       p, role:mec-admin, clusters, get, *, allow
       p, role:mec-admin, repositories, *, *, allow
       g, mec-admins, role:mec-admin
+      g, cluster-admins, role:admin
     scopes: '[groups]'

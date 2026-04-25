@@ -33,6 +33,76 @@ error()   { echo -e "${RED}[ERROR]${NC} $*"; }
 section() { echo -e "\n${BOLD}${BLUE}── $* ──${NC}"; }
 run()     { [[ "$DRY_RUN" == true ]] && { echo -e "${YELLOW}[DRY-RUN]${NC} $*"; return; }; eval "$*"; }
 
+# Helper: get installed or current CSV for a subscription
+_get_csv() {
+  local sub=$1 ns=$2
+  local csv
+  csv=$(oc get subscriptions.operators.coreos.com "$sub" -n "$ns" \
+    -o jsonpath='{.status.installedCSV}' 2>/dev/null || true)
+  [[ -z "$csv" ]] && csv=$(oc get subscriptions.operators.coreos.com "$sub" -n "$ns" \
+    -o jsonpath='{.status.currentCSV}' 2>/dev/null || true)
+  echo "$csv"
+}
+
+# Apply subscription only — do NOT wait. Skips if already Succeeded.
+# Usage: ensure_operator "desc" "sub-name" "namespace" "yaml"
+ensure_operator() {
+  local desc=$1 sub=$2 ns=$3 yaml=$4
+  local csv phase
+  csv=$(_get_csv "$sub" "$ns")
+  if [[ -n "$csv" ]]; then
+    phase=$(oc get csv "$csv" -n "$ns" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+    if [[ "$phase" == "Succeeded" ]]; then
+      success "${desc} already installed (${csv}) — skipping"
+      return
+    fi
+  fi
+  [[ "$DRY_RUN" == true ]] && { echo -e "${YELLOW}[DRY-RUN]${NC} oc apply -f ${yaml}"; return; }
+  oc apply -f "${yaml}"
+  info "${desc} subscription applied"
+}
+
+# Wait for subscription CSV to reach Succeeded. Skips immediately if already done.
+# Usage: wait_operator "desc" "sub-name" "namespace" "timeout_secs"
+wait_operator() {
+  local desc=$1 sub=$2 ns=$3 timeout=$4
+  local csv phase
+  csv=$(_get_csv "$sub" "$ns")
+  if [[ -n "$csv" ]]; then
+    phase=$(oc get csv "$csv" -n "$ns" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+    if [[ "$phase" == "Succeeded" ]]; then
+      success "${desc} ready (${csv})"
+      return
+    fi
+  fi
+  info "Waiting: ${desc} ready (max ${timeout}s)..."
+  local elapsed=0
+  while true; do
+    csv=$(_get_csv "$sub" "$ns")
+    if [[ -n "$csv" ]]; then
+      phase=$(oc get csv "$csv" -n "$ns" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+      if [[ "$phase" == "Succeeded" ]]; then
+        echo ""; success "${desc} ready (${csv})"; return
+      fi
+    fi
+    sleep 15; elapsed=$((elapsed+15))
+    [[ $elapsed -ge $timeout ]] && { echo ""; error "Timeout waiting for ${desc}"; exit 1; }
+    echo -n "."
+  done
+}
+
+# Apply a CR only if it does not already exist.
+# Usage: apply_cr "desc" "kind" "name" "-n namespace" "yaml"
+#        Pass "" as ns_arg for cluster-scoped resources.
+apply_cr() {
+  local desc=$1 kind=$2 name=$3 ns_arg=$4 yaml=$5
+  if oc get "$kind" "$name" ${ns_arg} --no-headers 2>/dev/null | grep -q .; then
+    info "${desc} already exists — skipping"
+    return
+  fi
+  run "oc apply -f ${yaml}"
+}
+
 wait_for() {
   local desc=$1 max=$2 cmd=$3
   info "Waiting: ${desc} (max ${max}s)..."
@@ -56,53 +126,103 @@ success "Logged in: $(oc whoami) @ $(oc whoami --show-server)"
 [[ "$VALIDATE_ONLY" == true ]] && { success "Validate-only — done."; exit 0; }
 
 # =============================================================================
-section "Step 1 — Wave 0 Operators (cert-manager, NFD, GPU, GitOps)"
+section "Step 1 — Wave 0 Operators (cert-manager, NFD, GPU) — parallel install"
 # =============================================================================
-for f in \
-  implementation/phase-01-foundation/operators/wave-0-certmanager-subscription.yaml \
-  implementation/phase-01-foundation/operators/wave-0-nfd-subscription.yaml \
-  implementation/phase-01-foundation/operators/wave-0-gpu-operator-subscription.yaml; do
-  run "oc apply -f ${f}"
-done
+# Apply all wave-0 subscriptions at once so operators install in parallel
+ensure_operator "cert-manager" "openshift-cert-manager-operator" "cert-manager-operator" \
+  "implementation/phase-01-foundation/operators/wave-0-certmanager-subscription.yaml"
+ensure_operator "NFD" "nfd" "openshift-nfd" \
+  "implementation/phase-01-foundation/operators/wave-0-nfd-subscription.yaml"
+ensure_operator "GPU operator" "gpu-operator-certified" "gpu-operator" \
+  "implementation/phase-01-foundation/operators/wave-0-gpu-operator-subscription.yaml"
 
-wait_for "cert-manager pods running" 300 \
-  "oc get pods -n cert-manager-operator --no-headers 2>/dev/null | grep -q Running"
-wait_for "NFD pods running" 300 \
-  "oc get pods -n openshift-nfd --no-headers 2>/dev/null | grep -q Running"
+# Wait for all wave-0 CSVs
+wait_operator "cert-manager" "openshift-cert-manager-operator" "cert-manager-operator" 300
+wait_operator "NFD"          "nfd"                             "openshift-nfd"          300
+wait_operator "GPU operator" "gpu-operator-certified"          "gpu-operator"           300
+
+# Apply CRs after operators are ready
+apply_cr "NFD instance"    "NodeFeatureDiscovery" "nfd-instance"      "-n openshift-nfd" \
+  "implementation/phase-01-foundation/operators/wave-0-nfd-instance.yaml"
+apply_cr "GPU ClusterPolicy" "ClusterPolicy"      "gpu-cluster-policy" "" \
+  "implementation/phase-01-foundation/operators/wave-0-gpu-cluster-policy.yaml"
+
 success "Wave 0 operators ready"
 
 # =============================================================================
 section "Step 2 — Bootstrap OpenShift GitOps (ArgoCD)"
 # =============================================================================
-run "oc apply -f gitops/bootstrap/01-gitops-operator.yaml"
-wait_for "GitOps operator ready" 300 \
-  "oc get csv -n openshift-gitops-operator --no-headers 2>/dev/null | grep -q Succeeded"
+ensure_operator "GitOps operator" "openshift-gitops-operator" "openshift-gitops-operator" \
+  "gitops/bootstrap/01-gitops-operator.yaml"
+wait_operator "GitOps operator" "openshift-gitops-operator" "openshift-gitops-operator" 300
 
-run "oc apply -f gitops/bootstrap/02-argocd-instance.yaml"
-run "oc apply -f gitops/bootstrap/03-argocd-project.yaml"
+apply_cr "ArgoCD instance" "ArgoCD"      "openshift-gitops" "-n openshift-gitops" \
+  "gitops/bootstrap/02-argocd-instance.yaml"
+apply_cr "ArgoCD project"  "AppProject"  "mec-content-ai"   "-n openshift-gitops" \
+  "gitops/bootstrap/03-argocd-project.yaml"
 wait_for "ArgoCD server running" 300 \
   "oc get pods -n openshift-gitops -l app.kubernetes.io/name=openshift-gitops-server --no-headers 2>/dev/null | grep -q Running"
+
+# Fix argocd-cm: operator generates broken 'cnectors' key and omits 'url' field.
+# Wait 15s for operator to reconcile first, then overwrite with correct config.
+info "Patching argocd-cm to fix OpenShift OAuth (operator typo workaround)..."
+APPS_DOMAIN=$(echo "${NEAR_EDGE_API}" | sed 's|https://api\.||' | sed 's|:6443||')
+ARGOCD_URL="https://openshift-gitops-server-openshift-gitops.${APPS_DOMAIN}"
+OAUTH_URL="https://oauth-openshift.${APPS_DOMAIN}"
+sleep 15
+[[ "$DRY_RUN" == false ]] && {
+  oc patch cm argocd-cm -n openshift-gitops --type merge \
+    -p "{\"data\":{\"url\":\"${ARGOCD_URL}\"}}"
+  oc patch cm argocd-cm -n openshift-gitops --type merge \
+    -p "{\"data\":{\"dex.config\":\"connectors:\\n- type: openshift\\n  id: openshift\\n  name: OpenShift\\n  config:\\n    issuer: ${OAUTH_URL}\\n    clientID: system:serviceaccount:openshift-gitops:openshift-gitops-argocd-dex-server\\n    clientSecret: \\\$oidc.dex.clientSecret\\n    insecureCA: true\\n    groups: []\\n\"}}"
+  oc rollout restart deployment openshift-gitops-dex-server openshift-gitops-server -n openshift-gitops
+  oc rollout status deployment openshift-gitops-dex-server openshift-gitops-server -n openshift-gitops
+}
 success "GitOps bootstrapped"
 
 # =============================================================================
-section "Step 3 — Wave 1 Operators (RHOAI, Kafka, AAP, ACM)"
+section "Step 3a — Wave 1 Prerequisites (Service Mesh, Serverless, Kafka, AAP, ACM) — parallel install"
 # =============================================================================
-for f in \
-  implementation/phase-01-foundation/operators/wave-1-rhoai-subscription.yaml \
-  implementation/phase-01-foundation/operators/wave-1-kafka-subscription.yaml \
-  implementation/phase-01-foundation/operators/wave-1-aap-subscription.yaml \
-  implementation/phase-01-foundation/operators/wave-1-acm-subscription.yaml \
-  implementation/phase-01-foundation/operators/wave-1-gitops-subscription.yaml; do
-  run "oc apply -f ${f}"
-done
+# Apply all subscriptions at once so operators install in parallel
+ensure_operator "Service Mesh 3.x"   "servicemeshoperator3"                 "openshift-operators"      \
+  "implementation/phase-01-foundation/operators/wave-1-servicemesh-subscription.yaml"
+ensure_operator "Serverless"          "serverless-operator"                  "openshift-serverless"     \
+  "implementation/phase-01-foundation/operators/wave-1-serverless-subscription.yaml"
+ensure_operator "Kafka (AMQ Streams)" "amq-streams"                          "amq-streams"              \
+  "implementation/phase-01-foundation/operators/wave-1-kafka-subscription.yaml"
+ensure_operator "AAP"                 "ansible-automation-platform-operator" "aap"                      \
+  "implementation/phase-01-foundation/operators/wave-1-aap-subscription.yaml"
+ensure_operator "ACM"                 "advanced-cluster-management"          "open-cluster-management"  \
+  "implementation/phase-01-foundation/operators/wave-1-acm-subscription.yaml"
 
-info "Waiting for wave 1 operators (this takes 5–10 minutes)..."
-wait_for "RHOAI operator ready"  600 "oc get csv -n redhat-ods-operator    --no-headers 2>/dev/null | grep -q Succeeded"
-wait_for "Kafka operator ready"  300 "oc get csv -n amq-streams             --no-headers 2>/dev/null | grep -q Succeeded"
-wait_for "AAP operator ready"    300 "oc get csv -n aap                     --no-headers 2>/dev/null | grep -q Succeeded"
-wait_for "ACM operator ready"    600 "oc get csv -n open-cluster-management --no-headers 2>/dev/null | grep -q Succeeded"
+# Wait for all wave-1a CSVs
+wait_operator "Service Mesh 3.x"   "servicemeshoperator3"                 "openshift-operators"     300
+wait_operator "Serverless"         "serverless-operator"                  "openshift-serverless"    300
+wait_operator "Kafka (AMQ Streams)" "amq-streams"                         "amq-streams"             300
+wait_operator "AAP"                "ansible-automation-platform-operator" "aap"                     300
+wait_operator "ACM"                "advanced-cluster-management"          "open-cluster-management" 600
+
+apply_cr "MultiClusterHub" "MultiClusterHub" "multiclusterhub" "-n open-cluster-management" \
+  "implementation/phase-01-foundation/operators/wave-1-acm-multiclusterhub.yaml"
 wait_for "ACM MultiClusterHub running" 600 \
   "oc get multiclusterhub -n open-cluster-management --no-headers 2>/dev/null | grep -q Running"
+
+# =============================================================================
+section "Step 3b — RHOAI 3.x (requires Service Mesh 3.x + Serverless)"
+# =============================================================================
+ensure_operator "RHOAI" "rhods-operator" "redhat-ods-operator" \
+  "implementation/phase-01-foundation/operators/wave-1-rhoai-subscription.yaml"
+wait_operator "RHOAI" "rhods-operator" "redhat-ods-operator" 600
+
+wait_for "DataScienceCluster CRD ready" 120 \
+  "oc get crd datascienceclusters.datasciencecluster.opendatahub.io --no-headers 2>/dev/null | grep -q ."
+wait_for "DSCInitialization CRD ready" 60 \
+  "oc get crd dscinitializations.dscinitialization.opendatahub.io --no-headers 2>/dev/null | grep -q ."
+apply_cr "DSCInitialization" "DSCInitialization" "default-dsci" "" \
+  "implementation/phase-01-foundation/operators/wave-1-rhoai-dsciinitialization.yaml"
+apply_cr "DataScienceCluster" "DataScienceCluster" "default-dsc" "" \
+  "implementation/phase-01-foundation/operators/wave-1-rhoai-datasciencecluster.yaml"
+
 success "Wave 1 operators ready"
 
 # =============================================================================
@@ -137,7 +257,8 @@ success "ArgoCD Applications deployed"
 section "Validation"
 # =============================================================================
 echo ""
-oc get csv -A --no-headers 2>/dev/null | grep -E "cert-manager|nfd|gpu|rhoai|amq|aap|acm|gitops" | \
+oc get csv -A --no-headers 2>/dev/null | \
+  grep -E "cert-manager|nfd|gpu|rhods|amq|aap|advanced-cluster|gitops|servicemesh|serverless" | \
   awk '{printf "%-50s %s\n", $2, $7}'
 echo ""
 oc get namespaces | grep mec

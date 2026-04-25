@@ -26,7 +26,38 @@ Status: ✅ Success | ❌ Failed | ⬜ Not yet run | 🔄 In progress
 
 ---
 
-## Step 1 — Set MEC Kubeconfig Variables
+## Step 1 — Register MEC Nodes with ACM ClusterSet
+
+> After each SNO node is registered as a ManagedCluster in ACM, it must be
+> labeled with both the ClusterSet membership label AND the role label so
+> that ACM Placement selects it and ArgoCD ApplicationSet deploys to it.
+
+```bash
+# For each MEC node — replace <cluster-name> with the actual ManagedCluster name
+MEC_CLUSTER=mec-stadium-01   # repeat for mec-stadium-02, etc.
+
+# 1. Assign to the far-edge ClusterSet (ExclusiveClusterSetLabel mechanism)
+oc label managedcluster ${MEC_CLUSTER} \
+  cluster.open-cluster-management.io/clusterset=far-edge-mec-clusters
+
+# 2. Add role labels so Placement predicates match
+oc label managedcluster ${MEC_CLUSTER} \
+  cluster-role=far-edge \
+  site-type=mec
+
+# 3. Verify labels applied
+oc get managedcluster ${MEC_CLUSTER} --show-labels
+```
+
+| Command | Why | Expected | Actual | Status |
+|---|---|---|---|---|
+| `oc label managedcluster mec-stadium-01 cluster.open-cluster-management.io/clusterset=far-edge-mec-clusters` | Join far-edge ClusterSet | `managedcluster.cluster.open-cluster-management.io/mec-stadium-01 labeled` | | ⬜ |
+| `oc label managedcluster mec-stadium-01 cluster-role=far-edge site-type=mec` | Match Placement predicates | labeled | | ⬜ |
+| `oc get placementdecision -n openshift-gitops` | ACM selected the cluster | mec-stadium-01 in decisions | | ⬜ |
+
+---
+
+## Step 2 — Set MEC Kubeconfig Variables
 
 > The MEC kubeconfigs were saved during setup-infra.sh.
 > Export them so subsequent steps can target far-edge clusters directly.
