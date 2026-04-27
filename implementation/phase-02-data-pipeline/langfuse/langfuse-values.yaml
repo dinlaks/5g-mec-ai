@@ -1,78 +1,124 @@
-# Langfuse Helm Values — Self-hosted on OpenShift 4.21
-# Chart: langfuse/langfuse
-# Add repo: helm repo add langfuse https://langfuse.github.io/langfuse-k8s
-# Install: helm upgrade --install langfuse langfuse/langfuse -n mec-ai-obs -f langfuse-values.yaml
+# Langfuse Helm Values (Chart 1.5.22, App 3.x)
+# Mirrors structure from msugur/auto-darknoc reference repo.
+# All secrets reference a single 'langfuse-secrets' Kubernetes Secret.
+# Apply: helm upgrade --install langfuse langfuse/langfuse -n mec-ai-obs -f langfuse-values.yaml
 
 langfuse:
-  # Pull secrets from existing Kubernetes Secrets (created by langfuse-secrets.yaml)
-  nextauth:
-    url: "https://langfuse.apps.<your-cluster-domain>"   # update with your Route URL
-    secret:
-      existingSecret: langfuse-app-secret
-      existingSecretKey: nextauth-secret
+  image:
+    tag: "3.155.1"
+    pullPolicy: IfNotPresent
 
-  encryptionKey:
-    existingSecret: langfuse-app-secret
-    existingSecretKey: encryption-key
+  features:
+    telemetryEnabled: false
+    signUpDisabled: false
+
+  additionalEnv:
+    - name: REDIS_HOST
+      value: redis.mec-ai-obs.svc.cluster.local
+    - name: REDIS_PORT
+      value: "6379"
+
+  web:
+    service:
+      type: ClusterIP
+      port: 3000
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+  worker:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
 
   salt:
-    existingSecret: langfuse-app-secret
-    existingSecretKey: salt
+    secretKeyRef:
+      name: langfuse-secrets
+      key: SALT
 
-  # Database — use external PostgreSQL deployed in this phase
-  database:
-    existingSecret: langfuse-db-secret
-    existingSecretKey: database-url
+  encryptionKey:
+    secretKeyRef:
+      name: langfuse-secrets
+      key: ENCRYPTION_KEY
 
-  # ClickHouse — analytics store
-  clickhouse:
-    host: clickhouse.mec-ai-obs.svc.cluster.local
-    port: 8123
-    nativePort: 9000
+  nextauth:
+    # url injected at deploy time via --set langfuse.nextauth.url=...
+    secret:
+      secretKeyRef:
+        name: langfuse-secrets
+        key: NEXTAUTH_SECRET
+
+# Disable bundled dependencies — using external deployments
+postgresql:
+  deploy: false
+  host: postgresql.mec-ai-obs.svc.cluster.local
+  port: 5432
+  auth:
+    username: langfuse
     database: langfuse
-    existingSecret: langfuse-clickhouse-secret
-    existingSecretKeyUser: user
-    existingSecretKeyPassword: password
+    existingSecret: langfuse-secrets
+    secretKeys:
+      userPasswordKey: DATABASE_PASSWORD
 
-  # Redis — queue backend
-  redis:
-    host: redis.mec-ai-obs.svc.cluster.local
-    port: 6379
-    auth:
-      enabled: false    # set to true if Redis is password-protected
+redis:
+  deploy: false
+  host: redis.mec-ai-obs.svc.cluster.local
+  port: 6379
+  auth:
+    username: null
+    existingSecret: langfuse-secrets
+    existingSecretPasswordKey: REDIS_PASSWORD
 
-  # Disable bundled dependencies — using our own deployments
-  postgresql:
-    deploy: false
-  redis:
-    deploy: false
-  clickhouse:
-    deploy: false
+clickhouse:
+  deploy: false
+  host: clickhouse.mec-ai-obs.svc.cluster.local
+  httpPort: 8123
+  nativePort: 9000
+  database: langfuse
+  auth:
+    username: langfuse
+    existingSecret: langfuse-secrets
+    existingSecretKey: CLICKHOUSE_PASSWORD
+  clusterEnabled: false
 
-# Langfuse web server
-web:
-  replicaCount: 1
-  resources:
-    requests:
-      memory: 512Mi
-      cpu: 250m
-    limits:
-      memory: 1Gi
-      cpu: "1"
-  # OpenShift requires non-root — Langfuse runs as non-root by default
+s3:
+  deploy: false
+  storageProvider: s3
+  bucket: mec-models
+  region: us-east-1
+  endpoint: http://minio.mec-ai-data.svc.cluster.local:9000
+  forcePathStyle: true
+  accessKeyId:
+    secretKeyRef:
+      name: langfuse-secrets
+      key: S3_ACCESS_KEY_ID
+  secretAccessKey:
+    secretKeyRef:
+      name: langfuse-secrets
+      key: S3_SECRET_ACCESS_KEY
+  mediaUpload:
+    enabled: true
+    bucket: mec-models
+    endpoint: http://minio.mec-ai-data.svc.cluster.local:9000
+    region: us-east-1
+    forcePathStyle: true
+    accessKeyId:
+      secretKeyRef:
+        name: langfuse-secrets
+        key: S3_ACCESS_KEY_ID
+    secretAccessKey:
+      secretKeyRef:
+        name: langfuse-secrets
+        key: S3_SECRET_ACCESS_KEY
 
-# Langfuse worker (flushes Redis → ClickHouse)
-worker:
-  replicaCount: 1
-  resources:
-    requests:
-      memory: 256Mi
-      cpu: 100m
-    limits:
-      memory: 512Mi
-      cpu: 500m
-
-# Disable built-in ingress — using OpenShift Route instead
 ingress:
   enabled: false
 

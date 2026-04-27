@@ -21,7 +21,7 @@ spec:
     path: implementation/phase-03-ai-core
   destination:
     server: https://kubernetes.default.svc
-    namespace: redhat-ods-applications
+    namespace: redhat-ods-applications   # default ns; each YAML's own namespace takes precedence via ServerSideApply
   syncPolicy:
     # Manual sync — prevents accidental model rollouts
     syncOptions:

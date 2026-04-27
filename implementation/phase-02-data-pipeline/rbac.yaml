@@ -60,6 +60,41 @@ metadata:
 # pull secret in openshift-config handles auth — no SA binding needed.
 
 ---
+# Grant anyuid SCC to MinIO SA — required for fsGroup: 1000 on PVC mounts
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: minio-sa-anyuid
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:anyuid
+subjects:
+  - kind: ServiceAccount
+    name: minio-sa
+    namespace: mec-ai-data
+---
+# Grant anyuid SCC to Langfuse backend SAs — PostgreSQL, ClickHouse, Redis
+# need specific UID/GID for data directory ownership on PVC mounts
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mec-ai-obs-anyuid
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:anyuid
+subjects:
+  - kind: ServiceAccount
+    name: postgresql-sa
+    namespace: mec-ai-obs
+  - kind: ServiceAccount
+    name: clickhouse-sa
+    namespace: mec-ai-obs
+  - kind: ServiceAccount
+    name: redis-sa
+    namespace: mec-ai-obs
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:

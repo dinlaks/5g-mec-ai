@@ -1,32 +1,30 @@
 #!/usr/bin/env bash
 # =============================================================================
 # setup-infra.sh — Full Infrastructure Bootstrap
-# 5G MEC Content Intelligence — RHDP OpenShift 4.21 + MicroShift Far Edge
+# 5G MEC Content Intelligence — RHDP OpenShift 4.21 + OpenShift SNO Far Edge
 #
 # Automates everything in docs/deployment/aws-infra-setup.md:
 #   1. Pre-flight checks (oc login, aws credentials, tools)
 #   2. Capture cluster values (INFRA_ID, VPC_ID, apps domain)
 #   3. Add GPU worker node (g5.2xlarge) via MachineSet
 #   4. Install NFD + GPU Operator → wait for GPU detected
-#   5. Launch 2 × RHEL 9 EC2 instances (MEC nodes)
-#   6. Install MicroShift on both via SSH
-#   7. Register both MEC nodes with ACM
-#   8. Verify full connectivity
-#   9. Write populated env.sh
+#   5. Deploy 2 × OpenShift SNO clusters (MEC nodes) via openshift-install
+#   6. Register both MEC SNO clusters with ACM
+#   7. Verify full connectivity
+#   8. Write populated env.sh
 #
 # Usage:
 #   ./scripts/setup-infra.sh                        # full run
 #   ./scripts/setup-infra.sh --validate             # pre-flight only
 #   ./scripts/setup-infra.sh --skip-gpu             # skip GPU node (no quota yet)
-#   ./scripts/setup-infra.sh --skip-mec             # skip MEC node setup
+#   ./scripts/setup-infra.sh --skip-mec             # skip MEC SNO setup
 #   ./scripts/setup-infra.sh --dry-run              # show what would happen
 #
 # Prerequisites:
 #   - oc CLI logged in to RHDP cluster (oc login ...)
 #   - AWS CLI configured with RHDP credentials (aws configure --profile rhdp)
-#   - SSH key at ~/.ssh/mec-key (generate: ssh-keygen -t ed25519 -f ~/.ssh/mec-key -N "")
+#   - openshift-install CLI available (for SNO cluster creation)
 #   - Red Hat pull secret at ~/.openshift/pull-secret.json
-#   - RH_USERNAME and RH_PASSWORD exported (for MicroShift subscription)
 # =============================================================================
 
 set -euo pipefail
@@ -93,29 +91,6 @@ wait_for() {
   success "${desc} — ready"
 }
 
-ssh_mec() {
-  # Run command on a MEC node via SSH (through OCP jump host)
-  local ip=$1
-  local cmd=$2
-  ssh -i ~/.ssh/mec-key \
-      -o StrictHostKeyChecking=no \
-      -o UserKnownHostsFile=/dev/null \
-      -J ec2-user@${OCP_JUMP_IP} \
-      ec2-user@${ip} \
-      "${cmd}"
-}
-
-scp_mec() {
-  # Copy file to MEC node via jump host
-  local src=$1
-  local ip=$2
-  local dst=$3
-  scp -i ~/.ssh/mec-key \
-      -o StrictHostKeyChecking=no \
-      -o UserKnownHostsFile=/dev/null \
-      -J ec2-user@${OCP_JUMP_IP} \
-      "${src}" "ec2-user@${ip}:${dst}"
-}
 
 # ── State directory ───────────────────────────────────────────────────────────
 STATE_DIR="${HOME}/mec-rhdp"
@@ -165,16 +140,12 @@ else
   ((ERRORS++))
 fi
 
-step "Checking RHEL subscription credentials"
-if [[ -z "${RH_USERNAME:-}" ]]; then
-  error "RH_USERNAME not set — export RH_USERNAME=<your-rh-username>"
-  ((ERRORS++))
+step "Checking openshift-install CLI"
+if command -v openshift-install &>/dev/null; then
+  success "openshift-install found: $(openshift-install version 2>/dev/null | head -1)"
+else
+  warn "openshift-install not found — required for SNO MEC node setup (--skip-mec to bypass)"
 fi
-if [[ -z "${RH_PASSWORD:-}" ]]; then
-  error "RH_PASSWORD not set — export RH_PASSWORD=<your-rh-password>"
-  ((ERRORS++))
-fi
-[[ -n "${RH_USERNAME:-}" && -n "${RH_PASSWORD:-}" ]] && success "RHEL credentials set"
 
 step "Checking oc login"
 if oc whoami &>/dev/null; then
@@ -548,7 +519,7 @@ kind: ManagedCluster
 metadata:
   name: ${CLUSTER_NAME}
   labels:
-    cluster.open-cluster-management.io/clusterset: far-edge
+    cluster.open-cluster-management.io/clusterset: far-edge-mec-clusters
     mec.site: ${SITE}
     mec.tier: far-edge
 spec:

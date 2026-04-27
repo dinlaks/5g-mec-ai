@@ -21,7 +21,7 @@ metadata:
 spec:
   topicName: content.requests.live
   partitions: 6       # 1 per MEC site (scale up as sites added)
-  replicas: 3
+  replicas: 1
   config:
     retention.ms: "1800000"       # 30 min — real-time signal, short lived
     cleanup.policy: delete
@@ -41,7 +41,7 @@ metadata:
 spec:
   topicName: ue.density.live
   partitions: 6
-  replicas: 3
+  replicas: 1
   config:
     retention.ms: "1800000"
     cleanup.policy: delete
@@ -61,7 +61,7 @@ metadata:
 spec:
   topicName: network.capacity.live
   partitions: 6
-  replicas: 3
+  replicas: 1
   config:
     retention.ms: "3600000"       # 1 hour
     cleanup.policy: delete
@@ -81,7 +81,7 @@ metadata:
 spec:
   topicName: cache.state
   partitions: 6
-  replicas: 3
+  replicas: 1
   config:
     retention.ms: "7200000"       # 2 hours
     cleanup.policy: delete
@@ -101,7 +101,7 @@ metadata:
 spec:
   topicName: qoe.metrics
   partitions: 6
-  replicas: 3
+  replicas: 1
   config:
     retention.ms: "7200000"
     cleanup.policy: delete
@@ -124,7 +124,7 @@ metadata:
 spec:
   topicName: demand.predictions
   partitions: 6
-  replicas: 3
+  replicas: 1
   config:
     retention.ms: "3600000"       # 1 hour — agent must act within the window
     cleanup.policy: delete
@@ -144,7 +144,7 @@ metadata:
 spec:
   topicName: agent.decisions
   partitions: 3
-  replicas: 3
+  replicas: 1
   config:
     retention.ms: "86400000"      # 24 hours — audit trail
     cleanup.policy: delete
@@ -164,7 +164,7 @@ metadata:
 spec:
   topicName: remediation.outcomes
   partitions: 3
-  replicas: 3
+  replicas: 1
   config:
     retention.ms: "604800000"     # 7 days — used for Kubeflow retraining input
     cleanup.policy: delete

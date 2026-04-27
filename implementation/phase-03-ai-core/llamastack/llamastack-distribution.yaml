@@ -28,16 +28,15 @@ spec:
       name: remote-vllm
     containerSpec:
       env:
-        # vLLM InferenceService URL (KServe — RHOAI managed)
-        # Update after InferenceService is Ready in Phase 03 Step 3
+        # vLLM InferenceService URL — substituted by phase-03-deploy.sh via envsubst
         - name: VLLM_URL
-          value: "https://llama-3-1-8b-instruct-predictor-redhat-ods-applications.apps.<your-cluster>"
+          value: "${VLLM_INFERENCE_URL}"
         # Model name as registered in vLLM
         - name: INFERENCE_MODEL
           value: "llama-3-1-8b-instruct"
-        # Langfuse OTLP endpoint — LlamaStack sends traces here
+        # Langfuse OTLP endpoint — substituted by phase-03-deploy.sh via envsubst
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
-          value: "https://langfuse.apps.<your-cluster>/api/otlp/v1/traces"
+          value: "${LANGFUSE_HOST}/api/otlp/v1/traces"
         - name: OTEL_SERVICE_NAME
           value: "mec-llamastack"
         # TLS — internal cluster traffic

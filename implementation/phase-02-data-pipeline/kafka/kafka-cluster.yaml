@@ -1,8 +1,8 @@
 ---
 # AMQ Streams 3.1 — Kafka Cluster (KRaft mode, no ZooKeeper)
 # Namespace: mec-ai-data
-# Uses KafkaNodePool CRs for KRaft — controllers + brokers as separate pools
-# External listener (Route) for far-edge MEC nodes to publish telemetry over TLS
+# PoC sizing: 1 controller + 1 broker (single-node sandbox)
+# Production: increase replicas to 3 and replication factors to 3
 
 # ── CONTROLLER NODE POOL ──────────────────────────────────────
 apiVersion: kafka.strimzi.io/v1beta2
@@ -13,21 +13,21 @@ metadata:
   labels:
     strimzi.io/cluster: kafka-cluster
 spec:
-  replicas: 3
+  replicas: 1
   roles:
     - controller
   storage:
     type: persistent-claim
     size: 10Gi
     deleteClaim: false
-    class: gp3-csi        # update to your StorageClass
+    class: gp3-csi
   resources:
     requests:
+      memory: 512Mi
+      cpu: 250m
+    limits:
       memory: 1Gi
       cpu: 500m
-    limits:
-      memory: 2Gi
-      cpu: "1"
 ---
 # ── BROKER NODE POOL ─────────────────────────────────────────
 apiVersion: kafka.strimzi.io/v1beta2
@@ -38,21 +38,21 @@ metadata:
   labels:
     strimzi.io/cluster: kafka-cluster
 spec:
-  replicas: 3
+  replicas: 1
   roles:
     - broker
   storage:
     type: persistent-claim
-    size: 50Gi
+    size: 20Gi
     deleteClaim: false
     class: gp3-csi
   resources:
     requests:
+      memory: 1Gi
+      cpu: 500m
+    limits:
       memory: 2Gi
       cpu: "1"
-    limits:
-      memory: 4Gi
-      cpu: "2"
 ---
 # ── KAFKA CLUSTER ─────────────────────────────────────────────
 apiVersion: kafka.strimzi.io/v1beta2
@@ -65,22 +65,19 @@ metadata:
     strimzi.io/kraft: enabled
 spec:
   kafka:
-    version: 3.7.0
-    metadataVersion: 3.7-IV4
+    version: 4.0.0
+    metadataVersion: 4.0-IV3
     listeners:
-      # Internal plain — for near-edge services (agent, MCP servers, EDA)
       - name: plain
         port: 9092
         type: internal
         tls: false
-      # Internal TLS — for services requiring encrypted comms
       - name: tls
         port: 9093
         type: internal
         tls: true
         authentication:
           type: tls
-      # External Route — for far-edge MEC nodes publishing telemetry
       - name: external
         port: 9094
         type: route
@@ -90,16 +87,14 @@ spec:
     authorization:
       type: simple
     config:
-      offsets.topic.replication.factor: 3
-      transaction.state.log.replication.factor: 3
-      transaction.state.log.min.isr: 2
-      default.replication.factor: 3
-      min.insync.replicas: 2
-      # Retention defaults (topics override per-topic)
+      offsets.topic.replication.factor: 1
+      transaction.state.log.replication.factor: 1
+      transaction.state.log.min.isr: 1
+      default.replication.factor: 1
+      min.insync.replicas: 1
       log.retention.hours: 24
-      log.retention.bytes: 10737418240    # 10 GB per partition
-      log.segment.bytes: 1073741824       # 1 GB segments
-      # Performance
+      log.retention.bytes: 10737418240
+      log.segment.bytes: 1073741824
       num.network.threads: 3
       num.io.threads: 8
       socket.send.buffer.bytes: 102400

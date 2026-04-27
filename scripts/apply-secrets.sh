@@ -102,6 +102,13 @@ section "Validating Environment Variables"
 
 ERRORS=0
 
+# Phase 03 — AI Core
+if [[ -z "$PHASE" || "$PHASE" == "03" ]]; then
+  info "Checking Phase 03 (AI Core) variables..."
+  check_var "MINIO_ACCESS_KEY" "MinIO access key (used for vLLM model data connection)" || ((ERRORS++))
+  check_var "MINIO_SECRET_KEY" "MinIO secret key (used for vLLM model data connection)" || ((ERRORS++))
+fi
+
 # Phase 04 — Automation
 if [[ -z "$PHASE" || "$PHASE" == "04" ]]; then
   info "Checking Phase 04 (Automation) variables..."
@@ -187,23 +194,27 @@ if [[ -z "$PHASE" || "$PHASE" == "02" ]]; then
     fi
   done
 
-  # PostgreSQL credentials (used by postgresql-deployment + langfuse-values)
+  # Single langfuse-secrets — consumed by Langfuse Helm chart (mirrors auto-darknoc pattern)
+  # ⚠️  ENCRYPTION_KEY and SALT must NEVER change after first deploy
+  apply_secret "langfuse-secrets" "mec-ai-obs" \
+    --from-literal=DATABASE_PASSWORD="${PG_PASSWORD}" \
+    --from-literal=CLICKHOUSE_PASSWORD="${CH_PASSWORD}" \
+    --from-literal=REDIS_PASSWORD="" \
+    --from-literal=NEXTAUTH_SECRET="${LANGFUSE_NEXTAUTH_SECRET}" \
+    --from-literal=SALT="${LANGFUSE_SALT}" \
+    --from-literal=ENCRYPTION_KEY="${LANGFUSE_ENCRYPTION_KEY}" \
+    --from-literal=S3_ACCESS_KEY_ID="${MINIO_ACCESS_KEY}" \
+    --from-literal=S3_SECRET_ACCESS_KEY="${MINIO_SECRET_KEY}"
+
+  # PostgreSQL deployment credentials (separate secret for the postgresql pod)
   apply_secret "langfuse-db-secret" "mec-ai-obs" \
     --from-literal=db-user="langfuse" \
-    --from-literal=db-password="${PG_PASSWORD}" \
-    --from-literal=database-url="postgresql://langfuse:${PG_PASSWORD}@postgresql.mec-ai-obs.svc.cluster.local:5432/langfuse"
+    --from-literal=db-password="${PG_PASSWORD}"
 
-  # ClickHouse credentials (used by clickhouse-deployment + langfuse-values)
+  # ClickHouse deployment credentials (separate secret for the clickhouse pod)
   apply_secret "langfuse-clickhouse-secret" "mec-ai-obs" \
     --from-literal=user="langfuse" \
     --from-literal=password="${CH_PASSWORD}"
-
-  # Langfuse app secrets (nextauth, encryption-key, salt)
-  # ⚠️  encryption-key and salt MUST NOT change after first deploy
-  apply_secret "langfuse-app-secret" "mec-ai-obs" \
-    --from-literal=nextauth-secret="${LANGFUSE_NEXTAUTH_SECRET}" \
-    --from-literal=encryption-key="${LANGFUSE_ENCRYPTION_KEY}" \
-    --from-literal=salt="${LANGFUSE_SALT}"
 
   # MinIO credentials (used by minio-deployment)
   apply_secret "minio-secret" "mec-ai-data" \
@@ -211,6 +222,27 @@ if [[ -z "$PHASE" || "$PHASE" == "02" ]]; then
     --from-literal=secret-key="${MINIO_SECRET_KEY}"
 
   success "Phase 02 secrets applied"
+fi
+
+# ── PHASE 03 — AI CORE SECRETS ────────────────────────────────
+if [[ -z "$PHASE" || "$PHASE" == "03" ]]; then
+  section "Phase 03 — AI Core Secrets"
+
+  if ! oc get namespace "redhat-ods-applications" &>/dev/null; then
+    error "Namespace 'redhat-ods-applications' does not exist. Run Phase 01 first."
+    exit 1
+  fi
+
+  # KServe/vLLM data connection — tells RHOAI where to pull model weights from MinIO
+  apply_secret "aws-connection-mec-models" "redhat-ods-applications" \
+    --from-literal=AWS_ACCESS_KEY_ID="${MINIO_ACCESS_KEY}" \
+    --from-literal=AWS_SECRET_ACCESS_KEY="${MINIO_SECRET_KEY}" \
+    --from-literal=AWS_S3_ENDPOINT="http://minio.mec-ai-data.svc.cluster.local:9000" \
+    --from-literal=AWS_DEFAULT_REGION="us-east-1" \
+    --from-literal=AWS_S3_BUCKET="mec-models" \
+    --from-literal=AWS_S3_USE_PATH_STYLE="true"
+
+  success "Phase 03 secrets applied"
 fi
 
 # ── PHASE 05 — AGENT & MCP SECRETS ────────────────────────────

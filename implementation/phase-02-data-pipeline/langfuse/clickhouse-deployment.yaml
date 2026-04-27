@@ -42,14 +42,8 @@ spec:
     spec:
       serviceAccountName: clickhouse-sa
 
-      # ── Pod-level security (restricted-v2 SCC) ────────────────────────────
-      # clickhouse-server Alpine image uses UID 101 / GID 101 (clickhouse user)
-      # fsGroup: 101 ensures the PVC mount is writable by the clickhouse group
       securityContext:
-        runAsNonRoot: true
         fsGroup: 101
-        seccompProfile:
-          type: RuntimeDefault
 
       containers:
         - name: clickhouse
@@ -95,13 +89,8 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 20
 
-          # ── Container-level security (restricted-v2 SCC) ──────────────────
           securityContext:
             allowPrivilegeEscalation: false
-            runAsNonRoot: true
-            capabilities:
-              drop:
-                - ALL
 
       volumes:
         - name: data

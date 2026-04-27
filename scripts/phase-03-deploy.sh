@@ -42,66 +42,119 @@ wait_for() {
 section "Pre-flight Checks"
 # =============================================================================
 if ! oc whoami &>/dev/null; then error "Not logged in."; exit 1; fi
-oc get csv -n redhat-ods-operator --no-headers 2>/dev/null | grep -q Succeeded || \
+(oc get csv -n redhat-ods-operator --no-headers 2>/dev/null | grep -q Succeeded) || \
   { error "RHOAI operator not ready — run phase-01 first."; exit 1; }
-oc get pods -n mec-ai-obs -l app.kubernetes.io/name=langfuse --no-headers 2>/dev/null | grep -q Running || \
+(oc get pods -n mec-ai-obs -l app.kubernetes.io/name=langfuse --no-headers 2>/dev/null | grep -q Running) || \
   { error "Langfuse not running — run phase-02 first."; exit 1; }
-oc get node -l node-role.kubernetes.io/gpu-worker &>/dev/null || \
-  warn "No GPU node found — vLLM InferenceService will be in pending state until GPU node is ready"
+if oc get node -l node-role.kubernetes.io/gpu-worker --no-headers 2>/dev/null | grep -q Ready; then
+  GPU_NODE=$(oc get node -l node-role.kubernetes.io/gpu-worker --no-headers 2>/dev/null | awk '{print $1}')
+  success "GPU node ready: ${GPU_NODE}"
+else
+  echo ""
+  warn "No GPU node found. vLLM (Step 4) will stay Pending until a GPU node is added."
+  echo ""
+  echo -e "${YELLOW}  ── How to add a GPU node ──${NC}"
+  echo -e "  Option A — Use the automated script (recommended):"
+  echo -e "    ${CYAN}./scripts/setup-infra.sh --skip-mec${NC}"
+  echo -e "    Adds a g5.2xlarge (NVIDIA A10G) worker node via MachineSet."
+  echo -e "    Requires: AWS CLI configured with RHDP credentials."
+  echo ""
+  echo -e "  Option B — Manual MachineSet (if AWS CLI unavailable):"
+  echo -e "    ${CYAN}oc get machineset -n openshift-machine-api${NC}   # get reference MachineSet"
+  echo -e "    Copy an existing MachineSet, change instanceType to g5.2xlarge,"
+  echo -e "    add label node-role.kubernetes.io/gpu-worker: ''"
+  echo -e "    ${CYAN}oc apply -f gpu-machineset.yaml${NC}"
+  echo ""
+  echo -e "  Option C — Proceed without GPU (Step 4 will remain Pending):"
+  echo -e "    LlamaStack and Agent phases can still be deployed."
+  echo -e "    vLLM InferenceService will become Ready once GPU node joins."
+  echo ""
+  read -rp "  Proceed without GPU node? [y/N] " PROCEED
+  if [[ "${PROCEED,,}" != "y" ]]; then
+    echo ""
+    info "Exiting. Add a GPU node and re-run: ./scripts/phase-03-deploy.sh"
+    exit 0
+  fi
+  warn "Proceeding without GPU node — Step 4 (vLLM) will be Pending."
+fi
 success "Pre-checks passed"
 [[ "$VALIDATE_ONLY" == true ]] && { success "Validate-only — done."; exit 0; }
 
 # =============================================================================
 section "Step 1 — RHOAI DataScienceCluster"
 # =============================================================================
-if oc get datasciencecluster -n redhat-ods-operator &>/dev/null 2>&1 | grep -q "No resources"; then
-  warn "DataScienceCluster not found — apply manually via RHOAI dashboard or CR"
-  warn "See: implementation/phase-03-ai-core/COMMANDS.md Step 1"
-else
+if oc get datasciencecluster &>/dev/null; then
   success "DataScienceCluster already exists"
+else
+  warn "DataScienceCluster not found — applying now"
+  run "oc apply -f implementation/phase-01-foundation/operators/wave-1-rhoai-datasciencecluster.yaml"
 fi
 
 # =============================================================================
 section "Step 2 — MinIO Data Connection Secret (for vLLM model)"
 # =============================================================================
-run "oc apply -f implementation/phase-03-ai-core/vllm/data-connection-secret.yaml"
+./scripts/apply-secrets.sh --phase 03 --validate
+./scripts/apply-secrets.sh --phase 03
+success "Phase 03 secrets applied"
 
 # =============================================================================
 section "Step 3 — vLLM ServingRuntime"
 # =============================================================================
 if oc get servingruntime vllm-runtime-mec -n redhat-ods-applications &>/dev/null; then
-  warn "vLLM ServingRuntime already exists — skipping"
+  info "vLLM ServingRuntime already exists — skipping"
 else
   run "oc apply -f implementation/phase-03-ai-core/vllm/vllm-servingruntime.yaml"
   success "vLLM ServingRuntime created"
 fi
 
 # =============================================================================
-section "Step 4 — ⏸ MANUAL: Download model via RHOAI Model Catalog"
+section "Step 4 — vLLM InferenceService (RHOAI Model Catalog)"
 # =============================================================================
-RHOAI_URL=$(oc get route rhods-dashboard -n redhat-ods-applications -o jsonpath='{.spec.host}' 2>/dev/null || echo "pending")
-pause_for_human "Download Llama 3.1 8B via RHOAI Model Catalog:
-  1. Open RHOAI Dashboard: https://${RHOAI_URL}
-  2. Go to: Models → Model Catalog
-  3. Search: RedHatAI/Llama-3.1-8B-Instruct
-  4. Click Deploy → select vllm-runtime-mec → deploy to redhat-ods-applications
-  5. Wait for InferenceService to show Ready in the dashboard
+APPS_DOMAIN=$(echo "${NEAR_EDGE_API}" | sed 's|https://api\.||' | sed 's|:6443||')
 
-  Alternatively apply directly:
-    envsubst < implementation/phase-03-ai-core/vllm/vllm-inferenceservice.tmpl.yaml | oc apply -f -
-  (requires VLLM_MODEL_NAME and VLLM_STORAGE_URI set in env.sh)"
+if oc get inferenceservice llama-3-1-8b-instruct -n redhat-ods-applications &>/dev/null; then
+  info "vLLM InferenceService already exists — skipping"
+else
+  run "oc apply -f implementation/phase-03-ai-core/vllm/vllm-inferenceservice.yaml"
+  success "vLLM InferenceService created — RHOAI catalog will pull the model automatically"
+fi
+
+# Wait for InferenceService Ready — GPU node + model pull can take 10-20 min
+if oc get node -l node-role.kubernetes.io/gpu-worker --no-headers 2>/dev/null | grep -q Ready; then
+  wait_for "vLLM InferenceService Ready" 1200 \
+    "oc get inferenceservice llama-3-1-8b-instruct -n redhat-ods-applications \
+     -o jsonpath='{.status.conditions[?(@.type==\"Ready\")].status}' 2>/dev/null | grep -q True"
+else
+  warn "No GPU node yet — InferenceService will become Ready once GPU node joins. Continuing..."
+fi
 
 # =============================================================================
 section "Step 5 — LlamaStack Distribution"
 # =============================================================================
-if oc get llamastackdistribution mec-llamastack -n mec-content-ai &>/dev/null; then
-  warn "LlamaStack already exists — skipping"
+# Auto-fetch vLLM URL from InferenceService status and persist to env.sh
+VLLM_INFERENCE_URL=$(oc get inferenceservice -n redhat-ods-applications \
+  -o jsonpath='{.items[0].status.url}' 2>/dev/null || true)
+if [[ -z "$VLLM_INFERENCE_URL" ]]; then
+  warn "vLLM InferenceService URL not yet available (GPU node pending?) — using placeholder"
+  VLLM_INFERENCE_URL="https://llama-3-1-8b-instruct.apps.${APPS_DOMAIN}"
 else
-  run "oc apply -f implementation/phase-03-ai-core/llamastack/llamastack-distribution.yaml"
+  success "vLLM URL: ${VLLM_INFERENCE_URL}"
+  # Persist to env.sh so Phase 05 agent and LlamaStack config pick it up
+  sed -i "s|^export VLLM_URL=.*|export VLLM_URL=\"${VLLM_INFERENCE_URL}\"|" configs/near-edge/env.sh
+  success "VLLM_URL saved to configs/near-edge/env.sh"
+fi
+export VLLM_INFERENCE_URL
+export LANGFUSE_HOST="${LANGFUSE_HOST:-https://langfuse.apps.${APPS_DOMAIN}}"
+
+if oc get llamastackdistribution mec-llamastack -n mec-content-ai &>/dev/null; then
+  info "LlamaStack already exists — skipping"
+else
+  envsubst < implementation/phase-03-ai-core/llamastack/llamastack-distribution.yaml | \
+    run "oc apply -f -"
   success "LlamaStack distribution created"
 fi
 
-wait_for "LlamaStack pod running" 300 \
+wait_for "LlamaStack pod running" 600 \
   "oc get pods -n mec-content-ai -l app=mec-llamastack --no-headers 2>/dev/null | grep -q Running"
 
 # =============================================================================

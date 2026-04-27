@@ -4,7 +4,7 @@
 # Stores: vLLM model weights, KServe LSTM model, Kubeflow pipeline artifacts
 # Bucket: mec-models
 # Single-node deployment (scale to distributed for production)
-# SCC: restricted-v2 — MinIO image supports non-root since v2023+; runs as UID 1000
+# SCC: anyuid — MinIO runs as UID 1000; anyuid SCC granted to minio-sa in rbac.yaml
 
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -43,14 +43,8 @@ spec:
     spec:
       serviceAccountName: minio-sa
 
-      # ── Pod-level security (restricted-v2 SCC) ────────────────────────────
-      # MinIO image (v2023+) supports non-root — runs as UID 1000 (minio user)
-      # fsGroup: 1000 ensures PVC mount is writable by the minio group
       securityContext:
-        runAsNonRoot: true
         fsGroup: 1000
-        seccompProfile:
-          type: RuntimeDefault
 
       containers:
         - name: minio
@@ -99,13 +93,8 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
 
-          # ── Container-level security (restricted-v2 SCC) ──────────────────
           securityContext:
             allowPrivilegeEscalation: false
-            runAsNonRoot: true
-            capabilities:
-              drop:
-                - ALL
 
       volumes:
         - name: data

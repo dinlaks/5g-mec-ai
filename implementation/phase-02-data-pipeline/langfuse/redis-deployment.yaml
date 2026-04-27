@@ -25,12 +25,7 @@ spec:
     spec:
       serviceAccountName: redis-sa
 
-      # ── Pod-level security (restricted-v2 SCC) ────────────────────────────
-      # registry.redhat.io/rhel9/redis-7 runs as UID 1001 (non-root) by default
-      securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
+      securityContext: {}
 
       containers:
         - name: redis
@@ -59,13 +54,8 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 10
 
-          # ── Container-level security (restricted-v2 SCC) ──────────────────
           securityContext:
             allowPrivilegeEscalation: false
-            runAsNonRoot: true
-            capabilities:
-              drop:
-                - ALL
 
 ---
 apiVersion: v1
