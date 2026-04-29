@@ -30,7 +30,7 @@
   hosts: all
   sources:
     - ansible.eda.kafka:
-        host: "{{ kafka_bootstrap_host }}"
+        host: "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local"
         port: "{{ kafka_bootstrap_port | default(9092) }}"
         topic: demand.predictions
         group_id: eda-mec-content-intelligence
