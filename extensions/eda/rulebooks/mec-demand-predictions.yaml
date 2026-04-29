@@ -46,7 +46,7 @@
     # All-Lightspeed: even the EDA fast-path uses lightspeed-generate-and-run.
     # The playbook description tells Granite exactly what to do for this event.
     - name: Auto-trigger Lightspeed playbook generation on ultra-high confidence
-      condition: 1 == 1  # debug: always true
+      condition: event.confidence >= 0.95
       action:
         run_job_template:
           name: lightspeed-generate-and-run
@@ -89,7 +89,7 @@
 
     # ── Rule 2: Log ultra-high confidence events for audit ─────────────────────
     - name: Log auto-triggered events
-      condition: 1 == 1  # debug: always true
+      condition: event.confidence >= 0.95
       action:
         print_event:
           pretty: true
