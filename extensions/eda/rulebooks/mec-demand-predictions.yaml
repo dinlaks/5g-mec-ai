@@ -34,6 +34,7 @@
         port: 9092
         topic: demand.predictions
         group_id: eda-mec-content-intelligence
+        auto_offset_reset: latest
         # TLS settings for AMQ Streams
         security_protocol: PLAINTEXT    # change to SSL when TLS enabled on Kafka
         # ssl_cafile: /etc/kafka/certs/ca.crt
