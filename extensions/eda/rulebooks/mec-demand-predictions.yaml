@@ -49,7 +49,7 @@
       action:
         run_job_template:
           name: lightspeed-generate-and-run
-          organization: "MEC Content Intelligence"
+          organization: "Default"
           job_args:
             extra_vars:
               mec_site_id: "{{ event.mec_site_id }}"
