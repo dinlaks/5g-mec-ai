@@ -2,6 +2,12 @@
 configs/near-edge/env.sh
 configs/far-edge/env.sh
 
+# Cluster CA certificates (cluster-specific — NEVER commit)
+*.crt
+*.ca
+configs/*.crt
+configs/*.ca
+
 # Secrets and credentials
 *.token
 *.pem

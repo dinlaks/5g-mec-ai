@@ -45,7 +45,7 @@ if ! oc whoami &>/dev/null; then error "Not logged in to OpenShift."; exit 1; fi
 for ns in mec-ai-data mec-ai-obs; do
   oc get namespace "$ns" &>/dev/null || { error "Namespace '$ns' missing — run phase-01 first."; exit 1; }
 done
-oc get crd kafkas.kafka.strimzi.io --no-headers 2>/dev/null | grep -q . || { error "AMQ Streams operator not ready — run phase-01 first."; exit 1; }
+oc get crd kafkas.kafka.strimzi.io --no-headers 2>/dev/null | grep . || { error > /dev/null"AMQ Streams operator not ready — run phase-01 first."; exit 1; }
 success "Pre-checks passed"
 [[ "$VALIDATE_ONLY" == true ]] && { success "Validate-only — done."; exit 0; }
 
@@ -64,7 +64,7 @@ section "Step 2 — Kafka Cluster + Topics"
 # =============================================================================
 run "oc apply -f implementation/phase-02-data-pipeline/kafka/kafka-cluster.yaml"
 wait_for "Kafka cluster Ready" 300 \
-  "oc get kafka kafka-cluster -n mec-ai-data -o jsonpath='{.status.conditions[?(@.type==\"Ready\")].status}' 2>/dev/null | grep -q True"
+  "oc get kafka kafka-cluster -n mec-ai-data -o jsonpath='{.status.conditions[?(@.type==\"Ready\")].status}' 2>/dev/null | grep True > /dev/null"
 run "oc apply -f implementation/phase-02-data-pipeline/kafka/kafka-topics.yaml"
 wait_for "All 8 Kafka topics Ready" 120 \
   "[[ \$(oc get kafkatopics -n mec-ai-data --no-headers 2>/dev/null | grep -c 'True' || true) -ge 8 ]]"
@@ -75,7 +75,7 @@ section "Step 3 — MinIO"
 # =============================================================================
 run "oc apply -f implementation/phase-02-data-pipeline/minio/minio-deployment.yaml"
 wait_for "MinIO pod running" 90 \
-  "oc get pods -n mec-ai-data -l app=minio --no-headers 2>/dev/null | grep -q Running"
+  "oc get pods -n mec-ai-data -l app=minio --no-headers 2>/dev/null | grep Running > /dev/null"
 success "MinIO ready"
 
 # =============================================================================
@@ -84,9 +84,9 @@ section "Step 4 — Langfuse Backends (PostgreSQL + ClickHouse + Redis)"
 run "oc apply -f implementation/phase-02-data-pipeline/langfuse/postgresql-deployment.yaml"
 run "oc apply -f implementation/phase-02-data-pipeline/langfuse/clickhouse-deployment.yaml"
 run "oc apply -f implementation/phase-02-data-pipeline/langfuse/redis-deployment.yaml"
-wait_for "PostgreSQL ready" 90 "oc get pods -n mec-ai-obs -l app=postgresql --no-headers 2>/dev/null | grep -q Running"
-wait_for "ClickHouse ready" 90 "oc get pods -n mec-ai-obs -l app=clickhouse --no-headers 2>/dev/null | grep -q Running"
-wait_for "Redis ready"      90 "oc get pods -n mec-ai-obs -l app=redis      --no-headers 2>/dev/null | grep -q Running"
+wait_for "PostgreSQL ready" 90 "oc get pods -n mec-ai-obs -l app=postgresql --no-headers 2>/dev/null | grep Running > /dev/null"
+wait_for "ClickHouse ready" 90 "oc get pods -n mec-ai-obs -l app=clickhouse --no-headers 2>/dev/null | grep Running > /dev/null"
+wait_for "Redis ready"      90 "oc get pods -n mec-ai-obs -l app=redis      --no-headers 2>/dev/null | grep Running > /dev/null"
 success "Langfuse backends ready"
 
 # =============================================================================
@@ -110,7 +110,7 @@ else
 fi
 
 wait_for "Langfuse web pod running" 180 \
-  "oc get pods -n mec-ai-obs -l app.kubernetes.io/name=langfuse --no-headers 2>/dev/null | grep -q Running"
+  "oc get pods -n mec-ai-obs -l app.kubernetes.io/name=langfuse --no-headers 2>/dev/null | grep Running > /dev/null"
 
 LANGFUSE_URL=$(oc get route langfuse -n mec-ai-obs -o jsonpath='{.spec.host}' 2>/dev/null)
 success "Langfuse ready: https://${LANGFUSE_URL}"

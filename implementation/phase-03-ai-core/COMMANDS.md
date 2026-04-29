@@ -30,7 +30,7 @@ Status: ✅ Success | ❌ Failed | ⬜ Not yet run | 🔄 In progress
 source configs/near-edge/env.sh
 
 oc create secret generic aws-connection-mec-models \
-  -n redhat-ods-applications \
+  -n mec-content-ai \
   --from-literal=AWS_ACCESS_KEY_ID=$MINIO_ACCESS_KEY \
   --from-literal=AWS_SECRET_ACCESS_KEY=$MINIO_SECRET_KEY \
   --from-literal=AWS_S3_ENDPOINT=http://minio.mec-ai-data.svc.cluster.local:9000 \
@@ -43,7 +43,7 @@ oc create secret generic aws-connection-mec-models \
 | Command | Why | Expected | Actual | Status |
 |---|---|---|---|---|
 | `oc create secret generic aws-connection-mec-models ... (above)` | MinIO S3 connection for RHOAI | `secret/aws-connection-mec-models configured` | | ⬜ |
-| `oc get secret aws-connection-mec-models -n redhat-ods-applications` | Verify secret exists | Secret listed | | ⬜ |
+| `oc get secret aws-connection-mec-models -n mec-content-ai` | Verify secret exists | Secret listed | | ⬜ |
 
 ---
 
@@ -56,7 +56,7 @@ oc apply -f implementation/phase-03-ai-core/vllm/vllm-servingruntime.yaml
 | Command | Why | Expected | Actual | Status |
 |---|---|---|---|---|
 | `oc apply -f implementation/phase-03-ai-core/vllm/vllm-servingruntime.yaml` | Register custom vLLM runtime | `servingruntime.serving.kserve.io/vllm-runtime-mec created` | | ⬜ |
-| `oc get servingruntime vllm-runtime-mec -n redhat-ods-applications` | Verify runtime registered | Runtime listed | | ⬜ |
+| `oc get servingruntime vllm-runtime-mec -n mec-content-ai` | Verify runtime registered | Runtime listed | | ⬜ |
 
 ---
 
@@ -76,7 +76,7 @@ echo "RHOAI Dashboard: https://$(oc get route rhods-dashboard -n redhat-ods-appl
 # Get HuggingFace token from: https://huggingface.co/settings/tokens
 # Accept model license at: https://huggingface.co/RedHatAI/Llama-3.1-8B-Instruct
 oc create secret generic hf-token-secret \
-  -n redhat-ods-applications \
+  -n mec-content-ai \
   --from-literal=token=hf_<your-hf-token> \
   --dry-run=client -o yaml | oc apply -f -
 ```
@@ -99,14 +99,14 @@ oc apply -f implementation/phase-03-ai-core/vllm/vllm-inferenceservice.yaml
 |---|---|---|---|---|
 | HuggingFace token secret created | Pull model from catalog | `secret configured` | | ⬜ |
 | Model deployed (dashboard or YAML) | InferenceService created | `inferenceservice.serving.kserve.io/llama-3-1-8b-instruct` | | ⬜ |
-| `oc get inferenceservice -n redhat-ods-applications -w` | Watch until Ready | `READY: True` | | ⬜ |
+| `oc get inferenceservice -n mec-content-ai -w` | Watch until Ready | `READY: True` | | ⬜ |
 
 > ⏱️ **Allow 10–20 minutes** for the model to be pulled and loaded on the GPU node.
 
 ### 3d — Get vLLM URL (needed for LlamaStack config)
 ```bash
 export VLLM_URL=$(oc get inferenceservice llama-3-1-8b-instruct \
-  -n redhat-ods-applications \
+  -n mec-content-ai \
   -o jsonpath='{.status.url}')
 echo "vLLM URL: $VLLM_URL"
 # Save this URL to configs/near-edge/env.sh as VLLM_URL
@@ -114,7 +114,7 @@ echo "vLLM URL: $VLLM_URL"
 
 | Command | Why | Expected | Actual | Status |
 |---|---|---|---|---|
-| `oc get inferenceservice llama-3-1-8b-instruct -n redhat-ods-applications -o jsonpath='{.status.url}'` | Get vLLM URL for LlamaStack | `https://llama-3-1-8b-instruct-predictor-...` | | ⬜ |
+| `oc get inferenceservice llama-3-1-8b-instruct -n mec-content-ai -o jsonpath='{.status.url}'` | Get vLLM URL for LlamaStack | `https://llama-3-1-8b-instruct-predictor-...` | | ⬜ |
 | `curl -s $VLLM_URL/health` | vLLM health check | `{"status":"ok"}` or HTTP 200 | | ⬜ |
 | Quick inference test (below) | Verify model responds | JSON response with content | | ⬜ |
 
@@ -178,7 +178,7 @@ oc apply -f implementation/phase-03-ai-core/llamastack/llamastack-distribution.y
 
 ```bash
 # Get LlamaStack service URL
-LLAMASTACK_URL="http://$(oc get svc -n mec-content-ai | grep llamastack | awk '{print $3}'):5001"
+LLAMASTACK_URL="http://$(oc get svc -n mec-content-ai | grep llamastack | awk '{print $3}'):8321"
 
 # Check registered models
 curl -s $LLAMASTACK_URL/v1/models | jq '.data[].model_id'

@@ -67,9 +67,9 @@ spec:
             - name: KAFKA_BOOTSTRAP
               value: "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092"
             - name: LLAMASTACK_URL
-              value: "http://llamastack.mec-content-ai.svc.cluster.local:5001"
+              value: "http://mec-llamastack.mec-content-ai.svc.cluster.local:8321"
             - name: MODEL_ID
-              value: "meta-llama/Llama-3.1-8B-Instruct"
+              value: "granite-3-3-8b"
             - name: CONFIDENCE_THRESHOLD
               value: "0.85"
             - name: SLACK_OPS_CHANNEL

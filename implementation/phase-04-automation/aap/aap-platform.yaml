@@ -12,6 +12,10 @@ metadata:
   labels:
     app.kubernetes.io/part-of: mec-content-ai
 spec:
+  # Platform-level admin password — prevents AAP from auto-generating aap-admin-password.
+  # Must match the secret created by apply-secrets.sh --phase 04 before this CR is applied.
+  admin_password_secret: aap-admin-secret
+
   # AutomationController — AWX-based playbook execution engine
   controller:
     disabled: false

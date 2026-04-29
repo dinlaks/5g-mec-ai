@@ -41,12 +41,14 @@
         # ssl_keyfile: /etc/kafka/certs/client.key
 
   rules:
-    # ── Rule 1: Ultra-high confidence — auto-prefetch, bypass agent ────────────
-    - name: Auto-prefetch on ultra-high confidence prediction
+    # ── Rule 1: Ultra-high confidence — Granite generates + executes playbook ───
+    # All-Lightspeed: even the EDA fast-path uses lightspeed-generate-and-run.
+    # The playbook description tells Granite exactly what to do for this event.
+    - name: Auto-trigger Lightspeed playbook generation on ultra-high confidence
       condition: event.confidence | float >= 0.95
       action:
         run_job_template:
-          name: prefetch-content
+          name: lightspeed-generate-and-run
           organization: "MEC Content Intelligence"
           job_args:
             extra_vars:
@@ -57,24 +59,34 @@
               event_type: "{{ event.event_type }}"
               event_start_utc: "{{ event.event_start_utc }}"
               confidence: "{{ event.confidence }}"
+              incident_id: "eda-auto-{{ event.mec_site_id }}-{{ event.content_id }}"
+              lightspeed_mode: "auto"
+              generated_playbook_name: "eda-prefetch-abr"
+              generated_from_model: "granite-3-3-8b"
+              generated_playbook_yaml: |
+                - name: EDA auto-triggered MEC pre-positioning
+                  hosts: localhost
+                  tasks:
+                    - name: Pre-cache content at MEC site
+                      kubernetes.core.k8s:
+                        state: present
+                        definition:
+                          apiVersion: batch/v1
+                          kind: Job
+                          metadata:
+                            name: prefetch-{{ event.content_id | replace('/', '-') }}
+                            namespace: mec-content-ai
+                          spec:
+                            template:
+                              spec:
+                                containers:
+                                  - name: prefetch
+                                    image: curlimages/curl:latest
+                                    command: [sh, -c, "curl -L {{ event.content_url }} -o /cache/{{ event.content_id }}"]
+                                restartPolicy: Never
               triggered_by: "eda-auto"
 
-    # ── Rule 2: Ultra-high confidence — also push ABR policy proactively ───────
-    - name: Push ABR quality cap on ultra-high confidence prediction
-      condition: event.confidence | float >= 0.95
-      action:
-        run_job_template:
-          name: push-abr-policy
-          organization: "MEC Content Intelligence"
-          job_args:
-            extra_vars:
-              mec_site_id: "{{ event.mec_site_id }}"
-              predicted_viewers: "{{ event.predicted_viewers }}"
-              event_type: "{{ event.event_type }}"
-              event_start_utc: "{{ event.event_start_utc }}"
-              triggered_by: "eda-auto"
-
-    # ── Rule 3: Log ultra-high confidence events for audit ─────────────────────
+    # ── Rule 2: Log ultra-high confidence events for audit ─────────────────────
     - name: Log auto-triggered events
       condition: event.confidence | float >= 0.95
       action:

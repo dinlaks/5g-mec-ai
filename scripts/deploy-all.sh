@@ -7,8 +7,11 @@
 # Pauses automatically at manual steps within each phase script.
 #
 # Usage:
+#   # One-time infra bootstrap (GPU node + env.sh generation) — run once before this:
+#   ./scripts/setup-infra.sh --skip-mec
+#
 #   source configs/near-edge/env.sh
-#   ./scripts/deploy-all.sh                     # full run (phases 01-06)
+#   ./scripts/deploy-all.sh                     # full run (phases 01-08)
 #   ./scripts/deploy-all.sh --from-phase 03     # resume from a specific phase
 #   ./scripts/deploy-all.sh --dry-run           # show what would run
 #   ./scripts/deploy-all.sh --validate          # pre-checks only (all phases)
@@ -109,11 +112,20 @@ echo -e "  Phase 07: ~20 min (backend + frontend image builds)"
 echo -e "  ${BOLD}Total: ~100-110 min${NC} (of which ~10 min is manual steps)"
 echo ""
 
-if ! oc whoami &>/dev/null; then
-  error "Not logged into OpenShift. Run: oc login --server=<url> --username=kubeadmin"
+# oc config view reads the kubeconfig locally — no network call, no hang risk
+OC_SERVER=$(oc config view -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true)
+OC_USER=$(oc config view -o jsonpath='{.users[0].name}' 2>/dev/null || true)
+if [[ -z "$OC_SERVER" ]]; then
+  error "No active kubeconfig. Run: oc login --server=<url> --username=kubeadmin"
   exit 1
 fi
-success "Logged in: $(oc whoami) @ $(oc whoami --show-server)"
+success "Kubeconfig active: ${OC_USER} @ ${OC_SERVER}"
+
+if [[ ! -f "configs/near-edge/env.sh" ]]; then
+  error "configs/near-edge/env.sh not found — run setup-infra.sh first:"
+  error "  ./scripts/setup-infra.sh --skip-mec"
+  exit 1
+fi
 
 if [[ -z "${GIT_REPO_URL:-}" ]] && [[ "$VALIDATE_ONLY" != true ]]; then
   error "GIT_REPO_URL is not set in env.sh — required for Phase 05 BuildConfigs"

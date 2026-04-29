@@ -14,7 +14,7 @@ model deployment workflow including pulling weights to MinIO/S3 storage.
 ## Workflow via RHOAI Dashboard
 
 ### Step 1 — Access Model Catalog
-1. Open RHOAI Dashboard: `https://$(oc get route rhods-dashboard -n redhat-ods-applications -o jsonpath='{.spec.host}')`
+1. Open RHOAI Dashboard: `https://$(oc get route rhods-dashboard -n mec-content-ai -o jsonpath='{.spec.host}')`
 2. Navigate to **Models** → **Model Catalog**
 3. Browse available models — filter by provider: **Red Hat** or **Meta**
 
@@ -32,14 +32,14 @@ If you prefer GitOps-driven deployment or the dashboard flow doesn't fit:
 ```bash
 # 1. Create HuggingFace token secret (needed to pull model)
 oc create secret generic hf-token-secret \
-  -n redhat-ods-applications \
+  -n mec-content-ai \
   --from-literal=token=hf_<your-huggingface-token>
 
 # 2. Apply the InferenceService (RHOAI will pull model from HF via token)
 oc apply -f implementation/phase-03-ai-core/vllm/vllm-inferenceservice.yaml
 
 # 3. Watch InferenceService status
-oc get inferenceservice llama-3-1-8b-instruct -n redhat-ods-applications -w
+oc get inferenceservice llama-3-1-8b-instruct -n mec-content-ai -w
 ```
 
 ---
@@ -62,6 +62,6 @@ To use `RedHatAI/Llama-3.1-8B-Instruct`:
 - After model is serving, get the URL for LlamaStack config:
   ```bash
   oc get inferenceservice llama-3-1-8b-instruct \
-    -n redhat-ods-applications \
+    -n mec-content-ai \
     -o jsonpath='{.status.url}'
   ```

@@ -1,20 +1,20 @@
 ---
 # vLLM InferenceService — TEMPLATE
-# Namespace: redhat-ods-applications
+# Namespace: mec-content-ai (RHOAI 3.3: protected namespace — use user namespace)
 # Variables: ${VLLM_MODEL_PATH}  — path inside mec-models bucket
 #            ${VLLM_MODEL_NAME}  — served model name (used in API calls)
 #            ${GPU_NODE_LABEL}   — node label to schedule on GPU node
 #
 # Render with:
-#   export VLLM_MODEL_PATH="llama-3-1-8b-instruct"
-#   export VLLM_MODEL_NAME="llama-3-1-8b-instruct"
+#   export VLLM_MODEL_PATH="granite-3-3-8b"
+#   export VLLM_MODEL_NAME="granite-3-3-8b"
 #   export GPU_NODE_LABEL="nvidia.com/gpu.present=true"
 #   envsubst < vllm-inferenceservice.tmpl.yaml > vllm-inferenceservice.yaml
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
   name: ${VLLM_MODEL_NAME}
-  namespace: redhat-ods-applications
+  namespace: mec-content-ai
   labels:
     app.kubernetes.io/part-of: mec-content-ai
   annotations:
@@ -32,8 +32,8 @@ spec:
     model:
       modelFormat:
         name: vLLM
-      runtime: vllm-runtime-mec
-      storageUri: "s3://mec-models/${VLLM_MODEL_PATH}"
+      runtime: vllm-cuda-runtime
+      storageUri: "oci://quay.io/redhat-ai-services/modelcar-catalog:granite-3.3-8b-instruct"
       resources:
         requests:
           cpu: "4"

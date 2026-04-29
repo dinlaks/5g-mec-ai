@@ -1,23 +1,24 @@
 ---
 # vLLM ServingRuntime — RHOAI 3.3
-# Namespace: redhat-ods-applications
-# Defines how KServe launches vLLM to serve Llama 3.1 8B Instruct
-# RHOAI 3.3 ships with a built-in vLLM runtime, but we define our own
-# for explicit version control and custom args (tensor parallelism, quantization)
+# Namespace: mec-content-ai
+# Model: Granite 3.3 8B Instruct — used for BOTH strategy reasoning AND Ansible Lightspeed
+# Single model architecture: one GPU, one model, two purposes.
+# Display name matches RHOAI template exactly so dashboard shows correctly.
 apiVersion: serving.kserve.io/v1alpha1
 kind: ServingRuntime
 metadata:
-  name: vllm-runtime-mec
-  namespace: redhat-ods-applications
+  name: vllm-cuda-runtime
+  namespace: mec-content-ai
   labels:
     app.kubernetes.io/part-of: mec-content-ai
   annotations:
-    openshift.io/display-name: "vLLM Runtime — MEC Content Intelligence"
+    openshift.io/display-name: "vLLM NVIDIA GPU ServingRuntime for KServe"
+    opendatahub.io/display-name: "vLLM NVIDIA GPU ServingRuntime for KServe"
     opendatahub.io/recommended-accelerators: '["nvidia.com/gpu"]'
+    opendatahub.io/runtime-version: "v0.13.0"
+    opendatahub.io/template-name: "vLLM NVIDIA GPU ServingRuntime for KServe"
+    opendatahub.io/template-namespace: "redhat-ods-applications"
 spec:
-  annotations:
-    prometheus.io/port: "8080"
-    prometheus.io/path: "/metrics"
   multiModel: false
   supportedModelFormats:
     - name: vLLM
@@ -25,7 +26,7 @@ spec:
       autoSelect: true
   containers:
     - name: kserve-container
-      image: quay.io/modh/vllm:rhoai-2.16-cuda     # RHOAI 3.3 vLLM image
+      image: registry.redhat.io/rhaiis/vllm-cuda-rhel9:3.2.4
       command:
         - python
         - -m
@@ -34,12 +35,8 @@ spec:
         - "--port=8080"
         - "--model=/mnt/models"
         - "--served-model-name={{.Name}}"
+        - "--dtype=half"
         - "--max-model-len=8192"
-        - "--dtype=bfloat16"
-        # Quantization — use AWQ for A10G (24GB VRAM), remove for L40S (48GB VRAM)
-        - "--quantization=awq"
-        # Tensor parallelism — 1 GPU. Set to 2 if using 2 GPUs
-        - "--tensor-parallel-size=1"
         - "--gpu-memory-utilization=0.90"
         - "--enable-chunked-prefill"
       env:
@@ -63,8 +60,6 @@ spec:
       volumeMounts:
         - name: shm
           mountPath: /dev/shm
-        - name: tmp
-          mountPath: /tmp
       readinessProbe:
         httpGet:
           path: /health
@@ -84,5 +79,3 @@ spec:
       emptyDir:
         medium: Memory
         sizeLimit: 12Gi
-    - name: tmp
-      emptyDir: {}

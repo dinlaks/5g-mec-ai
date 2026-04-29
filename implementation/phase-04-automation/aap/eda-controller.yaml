@@ -7,9 +7,9 @@
 #   - This pre-warms the cache while agent is still in strategy_reasoner node
 #   - Normal agent flow (confidence 0.85-0.95) goes through mcp-aap instead
 apiVersion: eda.ansible.com/v1alpha1
-kind: EDAController
+kind: EDA
 metadata:
-  name: eda-controller
+  name: eda
   namespace: aap
   labels:
     app.kubernetes.io/part-of: mec-content-ai

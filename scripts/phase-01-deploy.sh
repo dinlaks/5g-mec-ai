@@ -96,7 +96,7 @@ wait_operator() {
 #        Pass "" as ns_arg for cluster-scoped resources.
 apply_cr() {
   local desc=$1 kind=$2 name=$3 ns_arg=$4 yaml=$5
-  if oc get "$kind" "$name" ${ns_arg} --no-headers 2>/dev/null | grep -q .; then
+  if oc get "$kind" "$name" ${ns_arg} --no-headers 2>/dev/null | grep .; then > /dev/null
     info "${desc} already exists — skipping"
     return
   fi
@@ -161,7 +161,7 @@ apply_cr "ArgoCD instance" "ArgoCD"      "openshift-gitops" "-n openshift-gitops
 apply_cr "ArgoCD project"  "AppProject"  "mec-content-ai"   "-n openshift-gitops" \
   "gitops/bootstrap/03-argocd-project.yaml"
 wait_for "ArgoCD server running" 300 \
-  "oc get pods -n openshift-gitops -l app.kubernetes.io/name=openshift-gitops-server --no-headers 2>/dev/null | grep -q Running"
+  "oc get pods -n openshift-gitops -l app.kubernetes.io/name=openshift-gitops-server --no-headers 2>/dev/null | grep Running > /dev/null"
 
 # Fix argocd-cm: operator generates broken 'cnectors' key and omits 'url' field.
 # Wait 15s for operator to reconcile first, then overwrite with correct config.
@@ -205,7 +205,7 @@ wait_operator "ACM"                "advanced-cluster-management"          "open-
 apply_cr "MultiClusterHub" "MultiClusterHub" "multiclusterhub" "-n open-cluster-management" \
   "implementation/phase-01-foundation/operators/wave-1-acm-multiclusterhub.yaml"
 wait_for "ACM MultiClusterHub running" 600 \
-  "oc get multiclusterhub -n open-cluster-management --no-headers 2>/dev/null | grep -q Running"
+  "oc get multiclusterhub -n open-cluster-management --no-headers 2>/dev/null | grep Running > /dev/null"
 
 # =============================================================================
 section "Step 3b — RHOAI 3.x (requires Service Mesh 3.x + Serverless)"
@@ -215,13 +215,35 @@ ensure_operator "RHOAI" "rhods-operator" "redhat-ods-operator" \
 wait_operator "RHOAI" "rhods-operator" "redhat-ods-operator" 600
 
 wait_for "DataScienceCluster CRD ready" 120 \
-  "oc get crd datascienceclusters.datasciencecluster.opendatahub.io --no-headers 2>/dev/null | grep -q ."
+  "oc get crd datascienceclusters.datasciencecluster.opendatahub.io --no-headers 2>/dev/null | grep . > /dev/null"
 wait_for "DSCInitialization CRD ready" 60 \
-  "oc get crd dscinitializations.dscinitialization.opendatahub.io --no-headers 2>/dev/null | grep -q ."
+  "oc get crd dscinitializations.dscinitialization.opendatahub.io --no-headers 2>/dev/null | grep . > /dev/null"
 apply_cr "DSCInitialization" "DSCInitialization" "default-dsci" "" \
   "implementation/phase-01-foundation/operators/wave-1-rhoai-dsciinitialization.yaml"
 apply_cr "DataScienceCluster" "DataScienceCluster" "default-dsc" "" \
   "implementation/phase-01-foundation/operators/wave-1-rhoai-datasciencecluster.yaml"
+
+wait_for "RHOAI DataScienceCluster Ready" 300 \
+  "oc get datasciencecluster default-dsc \
+   -o jsonpath='{.status.conditions[?(@.type==\"Ready\")].status}' 2>/dev/null | grep True > /dev/null"
+
+step "Enabling RHOAI dashboard features (GenAI Studio, Evaluation, Feature Store, Registries)"
+oc patch odhdashboardconfig odh-dashboard-config \
+  -n redhat-ods-applications --type=merge -p '{
+    "spec": {
+      "dashboardConfig": {
+        "genAiStudio": true,
+        "disableLLMd": false,
+        "disableLMEval": false,
+        "disableTrustyBiasMetrics": false,
+        "disableFeatureStore": false,
+        "disableModelRegistry": false,
+        "disableModelCatalog": false,
+        "disablePipelines": false
+      }
+    }
+  }' 2>&1 && success "RHOAI dashboard features enabled" || \
+  warn "OdhDashboardConfig patch failed — apply manually after RHOAI is Ready"
 
 success "Wave 1 operators ready"
 
@@ -230,7 +252,7 @@ section "Step 4 — Create Namespaces"
 # =============================================================================
 run "oc apply -f implementation/phase-01-foundation/namespaces/namespaces.yaml"
 for ns in mec-content-ai mec-ai-data mec-ai-obs far-edge-mec; do
-  wait_for "Namespace ${ns} active" 60 "oc get namespace ${ns} --no-headers 2>/dev/null | grep -q Active"
+  wait_for "Namespace ${ns} active" 60 "oc get namespace ${ns} --no-headers 2>/dev/null | grep Active > /dev/null"
 done
 success "Namespaces created"
 
@@ -250,7 +272,7 @@ section "Step 6 — Deploy ArgoCD Applications (GitOps takes over)"
 run "oc apply -f gitops/apps/near-edge/"
 run "oc apply -f gitops/apps/far-edge/"
 wait_for "ArgoCD apps created" 120 \
-  "oc get applications -n openshift-gitops --no-headers 2>/dev/null | wc -l | grep -qv '^0$'"
+  "oc get applications -n openshift-gitops --no-headers 2>/dev/null | wc -l | grep -v '^0$' > /dev/null"
 success "ArgoCD Applications deployed"
 
 # =============================================================================

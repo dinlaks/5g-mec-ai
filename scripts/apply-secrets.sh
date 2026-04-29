@@ -228,13 +228,14 @@ fi
 if [[ -z "$PHASE" || "$PHASE" == "03" ]]; then
   section "Phase 03 — AI Core Secrets"
 
-  if ! oc get namespace "redhat-ods-applications" &>/dev/null; then
-    error "Namespace 'redhat-ods-applications' does not exist. Run Phase 01 first."
+  if ! oc get namespace "mec-content-ai" &>/dev/null; then
+    error "Namespace 'mec-content-ai' does not exist. Run Phase 01 first."
     exit 1
   fi
 
-  # KServe/vLLM data connection — tells RHOAI where to pull model weights from MinIO
-  apply_secret "aws-connection-mec-models" "redhat-ods-applications" \
+  # KServe/vLLM data connection — must be in the same namespace as the InferenceService
+  # In RHOAI 3.3, InferenceServices run in user namespaces (mec-content-ai), not redhat-ods-applications
+  apply_secret "aws-connection-mec-models" "mec-content-ai" \
     --from-literal=AWS_ACCESS_KEY_ID="${MINIO_ACCESS_KEY}" \
     --from-literal=AWS_SECRET_ACCESS_KEY="${MINIO_SECRET_KEY}" \
     --from-literal=AWS_S3_ENDPOINT="http://minio.mec-ai-data.svc.cluster.local:9000" \

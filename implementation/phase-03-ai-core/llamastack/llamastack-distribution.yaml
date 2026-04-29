@@ -1,18 +1,3 @@
----
-# LlamaStack Distribution — LlamaStackDistribution CRD
-# API: llamastack.io/v1alpha1
-# Managed by: llama-stack-k8s-operator (ships with RHOAI 3.3 — no separate install needed)
-# Version: 0.4.2 (RHOAI 3.3 / ODH 3.3 ships with 0.4.2.1+rhai0)
-# Namespace: mec-content-ai
-#
-# This CR tells the RHOAI-managed LlamaStack operator to deploy a LlamaStack
-# instance that uses our vLLM InferenceService as the inference backend.
-# The operator manages the pod lifecycle — we do NOT deploy a Deployment manually.
-#
-# ⚠️  Update vllm-url AFTER the vLLM InferenceService is Ready (Step 3 in COMMANDS.md)
-#     Get URL: oc get inferenceservice llama-3-1-8b-instruct \
-#               -n redhat-ods-applications \
-#               -o jsonpath='{.status.url}'
 apiVersion: llamastack.io/v1alpha1
 kind: LlamaStackDistribution
 metadata:
@@ -22,27 +7,46 @@ metadata:
     app.kubernetes.io/part-of: mec-content-ai
 spec:
   replicas: 1
+  network:
+    exposeRoute: true
   server:
-    # remote-vllm distribution — LlamaStack backed by a remote vLLM endpoint
+    workers: 1
     distribution:
-      name: remote-vllm
+      name: "rh-dev"
     containerSpec:
+      name: llamastack
+      port: 8321
       env:
-        # vLLM InferenceService URL — substituted by phase-03-deploy.sh via envsubst
+        - name: POSTGRES_HOST
+          value: "postgresql.mec-ai-obs.svc.cluster.local"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "llamastack"
+        - name: POSTGRES_USER
+          value: "langfuse"
+        - name: POSTGRES_PASSWORD
+          value: "${PG_PASSWORD}"
         - name: VLLM_URL
           value: "${VLLM_INFERENCE_URL}"
-        # Model name as registered in vLLM
+        - name: VLLM_API_TOKEN
+          value: "fake"
+        - name: VLLM_EMBEDDING_URL
+          value: "${VLLM_INFERENCE_URL}"
+        - name: VLLM_EMBEDDING_API_TOKEN
+          value: "fake"
         - name: INFERENCE_MODEL
-          value: "llama-3-1-8b-instruct"
-        # Langfuse OTLP endpoint — substituted by phase-03-deploy.sh via envsubst
+          value: "granite-3-3-8b"
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           value: "${LANGFUSE_HOST}/api/otlp/v1/traces"
         - name: OTEL_SERVICE_NAME
           value: "mec-llamastack"
-        # TLS — internal cluster traffic
         - name: SSL_VERIFY
           value: "false"
-    # Persistent storage for LlamaStack state (agent memory, session data)
-    storage:
-      size: "5Gi"
-      mountPath: "/home/lls/.lls"
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi

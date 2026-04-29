@@ -1,21 +1,60 @@
 # DataScienceCluster — applied AFTER DSCInitialization and RHOAI operator CSV reaches Succeeded
-# RHOAI 3.x: component-level managementState removed — include component to enable, omit to disable
+# RHOAI 3.3 confirmed on OCP 4.20:
+#   - Every component needs explicit managementState: Managed to appear in dashboard
+#   - kueue: only supports Removed or Unmanaged (not Managed)
+#   - modelsAsService: Removed — requires Gateway API (maas-default-gateway), not needed here
+#   - kserve: must have managementState: Managed at component level for ServingRuntime CRDs
 apiVersion: datasciencecluster.opendatahub.io/v1
 kind: DataScienceCluster
 metadata:
   name: default-dsc
 spec:
   components:
+    # Core dashboard + workbenches
+    dashboard:
+      managementState: Managed
+    workbenches:
+      managementState: Managed
+
+    # Model serving (vLLM + KServe)
     kserve:
-      serving:
-        managementState: Managed
-        name: knative-serving
-        ingressGateway:
-          certificate:
-            type: OpenshiftDefaultIngress
-    dashboard: {}
-    workbenches: {}
-    datasciencepipelines: {}
-    kueue: {}
-    codeflare: {}
-    modelcontroller: {}
+      managementState: Managed
+      modelsAsService:
+        managementState: Removed   # Requires Gateway API — not needed for direct InferenceService
+
+    # AI Hub — Model Registry (left pane: Registry, Catalog)
+    modelregistry:
+      managementState: Managed
+      registriesNamespace: rhoai-model-registries
+
+    # GenAI Studio (LlamaStack integration)
+    llamastackoperator:
+      managementState: Managed
+
+    # Feature Store
+    feastoperator:
+      managementState: Managed
+
+    # Pipelines, Experiments, Evaluation
+    aipipelines:
+      managementState: Managed
+    trustyai:
+      managementState: Managed
+    trainingoperator:
+      managementState: Managed
+
+    # Distributed compute
+    ray:
+      managementState: Managed
+
+    # Kueue: Removed only (Managed not supported in this RHOAI 3.3 build)
+    kueue:
+      managementState: Removed
+
+---
+# OdhDashboardConfig patch — enables missing left-pane features in RHOAI 3.3 dashboard.
+# Apply after DataScienceCluster is Ready:
+#   oc patch odhdashboardconfig odh-dashboard-config -n redhat-ods-applications --type=merge -p \
+#   '{"spec":{"dashboardConfig":{"genAiStudio":true,"disableLLMd":false,"disableLMEval":false,
+#   "disableTrustyBiasMetrics":false,"disableFeatureStore":false,"disableModelRegistry":false,
+#   "disableModelCatalog":false,"disablePipelines":false}}}'

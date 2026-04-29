@@ -1,20 +1,18 @@
 ---
-# vLLM InferenceService — Rendered
-# Model: Llama 3.1 8B Instruct (quantized AWQ)
-# Namespace: redhat-ods-applications
-# Update GPU_NODE_LABEL value to match your actual GPU node label
-# Generated from: vllm-inferenceservice.tmpl.yaml
+# Granite 3.3 8B InferenceService
+# Namespace: mec-content-ai (RHOAI 3.3 — redhat-ods-applications is protected)
+# Serves: strategy reasoning (LangGraph) + Ansible playbook generation (Lightspeed)
+# Single model architecture — both purposes on one A10G GPU.
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
-  name: llama-3-1-8b-instruct
-  namespace: redhat-ods-applications
+  name: granite-3-3-8b
+  namespace: mec-content-ai
   labels:
     app.kubernetes.io/part-of: mec-content-ai
   annotations:
-    serving.knative.openshift.io/enablePassthrough: "true"
-    sidecar.istio.io/inject: "true"
-    sidecar.istio.io/rewriteAppHTTPProbers: "true"
+    serving.kserve.io/deploymentMode: RawDeployment
+    opendatahub.io/hardware-profile-name: nvidia-a10g-gpu
 spec:
   predictor:
     tolerations:
@@ -22,12 +20,12 @@ spec:
         operator: Exists
         effect: NoSchedule
     nodeSelector:
-      nvidia.com/gpu.present: "true"     # update if your GPU node uses a different label
+      nvidia.com/gpu.present: "true"
     model:
       modelFormat:
         name: vLLM
-      runtime: vllm-runtime-mec
-      storageUri: "s3://mec-models/llama-3-1-8b-instruct"
+      runtime: vllm-cuda-runtime
+      storageUri: "oci://quay.io/redhat-ai-services/modelcar-catalog:granite-3.3-8b-instruct"
       resources:
         requests:
           cpu: "4"

@@ -8,7 +8,7 @@ This is the reasoning engine the LangGraph agent (Phase 05) calls through LlamaS
 
 ### vLLM (via RHOAI 3.3 KServe)
 - Model: **Llama 3.1 8B Instruct** (quantized — fits A10G / L40S GPU)
-- Served as a KServe InferenceService in `redhat-ods-applications`
+- Served as a KServe InferenceService in `mec-content-ai`
 - Exposes OpenAI-compatible `/v1/chat/completions` API
 - GPU node required (labelled by NFD + GPU Operator from Phase 01)
 
@@ -49,7 +49,7 @@ phase-03-ai-core/
 └── llamastack/
     ├── llamastack-distribution.tmpl.yaml ← template
     ├── llamastack-distribution.yaml      ← rendered actual
-    └── llamastack-deployment.yaml        ← Deployment + Service (port 5001)
+    └── llamastack-distribution.yaml      ← LlamaStackDistribution CRD (port 8321, rh-dev)
 ```
 
 ## Dependencies
@@ -64,7 +64,7 @@ phase-03-ai-core/
 
 ## Validation
 ```bash
-oc get inferenceservice -n redhat-ods-applications
+oc get inferenceservice -n mec-content-ai
 curl https://$VLLM_URL/health
 curl -s $LLAMASTACK_URL/v1/models | jq '.data[].id'
 ```

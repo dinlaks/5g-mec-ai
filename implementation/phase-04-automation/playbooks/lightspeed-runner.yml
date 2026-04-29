@@ -1,0 +1,82 @@
+---
+# lightspeed-runner.yml
+# Receives a Granite-generated playbook YAML from the LangGraph agent
+# and executes it dynamically on the target MEC cluster.
+#
+# Called by AAP job template: lightspeed-generate-and-run
+# Triggered by: LangGraph lightspeed_node via mcp-aap
+#
+# Required extra_vars (passed by agent):
+#   generated_playbook_yaml   : Ansible playbook YAML string from Granite
+#   generated_playbook_name   : Short name for the playbook (for audit)
+#   generated_from_model      : Model that generated it (granite-lightspeed)
+#   mec_site_id               : Target MEC site ID
+#   edge_cluster              : Target kubeconfig context
+#   incident_id               : Run ID from LangGraph for traceability
+#   lightspeed_mode           : "auto" or "human-approved"
+- name: Execute Lightspeed-generated playbook
+  hosts: localhost
+  gather_facts: false
+  vars:
+    generated_playbook_yaml: ""
+    generated_playbook_name: "lightspeed-generated"
+    generated_from_model: "granite-lightspeed"
+    mec_site_id: "unknown"
+    incident_id: "unknown"
+    lightspeed_mode: "auto"
+    kafka_bootstrap: "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092"
+
+  tasks:
+    - name: Validate generated playbook is not empty
+      ansible.builtin.fail:
+        msg: "generated_playbook_yaml is empty — Granite did not produce a playbook"
+      when: generated_playbook_yaml | length == 0
+
+    - name: Write generated playbook to temp file
+      ansible.builtin.copy:
+        content: "{{ generated_playbook_yaml }}"
+        dest: "/tmp/{{ generated_playbook_name }}-{{ incident_id }}.yml"
+        mode: "0600"
+
+    - name: Validate playbook syntax
+      ansible.builtin.command:
+        cmd: "ansible-playbook --syntax-check /tmp/{{ generated_playbook_name }}-{{ incident_id }}.yml"
+      register: syntax_check
+      ignore_errors: true
+
+    - name: Fail if syntax check failed
+      ansible.builtin.fail:
+        msg: "Syntax check failed: {{ syntax_check.stderr }}"
+      when: syntax_check.rc != 0
+
+    - name: Execute the generated playbook
+      ansible.builtin.command:
+        cmd: "ansible-playbook /tmp/{{ generated_playbook_name }}-{{ incident_id }}.yml"
+      register: playbook_result
+      ignore_errors: true
+
+    - name: Publish result to Kafka remediation.outcomes
+      ansible.builtin.shell: |
+        echo '{"incident_id":"{{ incident_id }}","mec_site_id":"{{ mec_site_id }}",
+               "playbook":"{{ generated_playbook_name }}","model":"{{ generated_from_model }}",
+               "lightspeed_mode":"{{ lightspeed_mode }}",
+               "status":"{{ "success" if playbook_result.rc == 0 else "failed" }}",
+               "timestamp":"{{ ansible_date_time.iso8601 | default(lookup("pipe","date -u +%Y-%m-%dT%H:%M:%SZ")) }}"}' | \
+        /usr/local/bin/kafka-console-producer.sh \
+          --bootstrap-server {{ kafka_bootstrap }} \
+          --topic remediation.outcomes
+      ignore_errors: true
+
+    - name: Cleanup temp playbook
+      ansible.builtin.file:
+        path: "/tmp/{{ generated_playbook_name }}-{{ incident_id }}.yml"
+        state: absent
+
+    - name: Report result
+      ansible.builtin.debug:
+        msg: "Lightspeed playbook {{ generated_playbook_name }} {{ 'succeeded' if playbook_result.rc == 0 else 'FAILED' }}"
+
+    - name: Fail task if playbook execution failed
+      ansible.builtin.fail:
+        msg: "Generated playbook execution failed: {{ playbook_result.stderr | default('unknown error') }}"
+      when: playbook_result.rc != 0
