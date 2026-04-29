@@ -1,0 +1,94 @@
+---
+# EDA Rulebook — MEC Content Pre-positioning
+# File: aap/eda-rulebook.yaml
+#
+# This is an Ansible Rulebook (not a K8s CRD).
+# It is imported into the EDA Controller via REST API (see COMMANDS.md Step 6).
+#
+# Role in the architecture:
+#   - Listens continuously on Kafka demand.predictions topic
+#   - confidence >= 0.95 → auto-trigger prefetch-content job (bypass LangGraph agent)
+#     Rationale: ultra-high confidence events (known stadium fixtures, confirmed schedules)
+#     don't need agent reasoning — act immediately to maximise pre-cache lead time
+#   - confidence 0.85–0.94 → do nothing here; LangGraph agent reads demand.predictions
+#     directly via mcp-kafka and handles these with full reasoning + human-in-loop
+#   - confidence < 0.85 → ignore; LSTM prediction too uncertain to act on
+#
+# Kafka event payload expected (published by far-edge LSTM model):
+# {
+#   "mec_site_id": "mec-stadium-01",
+#   "content_id": "nfl-chiefs-ravens-2026-01-18",
+#   "content_url": "https://cdn.partner.com/nfl/chiefs-ravens/",
+#   "predicted_viewers": 48000,
+#   "event_type": "live_sport",
+#   "event_start_utc": "2026-01-18T18:30:00Z",
+#   "confidence": 0.97,
+#   "predicted_peak_in_minutes": 22
+# }
+
+- name: MEC Content Pre-positioning — EDA Rulebook
+  hosts: all
+  sources:
+    - ansible.eda.kafka:
+        host: "{{ kafka_bootstrap_host }}"
+        port: "{{ kafka_bootstrap_port | default(9092) }}"
+        topic: demand.predictions
+        group_id: eda-mec-content-intelligence
+        # TLS settings for AMQ Streams
+        security_protocol: PLAINTEXT    # change to SSL when TLS enabled on Kafka
+        # ssl_cafile: /etc/kafka/certs/ca.crt
+        # ssl_certfile: /etc/kafka/certs/client.crt
+        # ssl_keyfile: /etc/kafka/certs/client.key
+
+  rules:
+    # ── Rule 1: Ultra-high confidence — Granite generates + executes playbook ───
+    # All-Lightspeed: even the EDA fast-path uses lightspeed-generate-and-run.
+    # The playbook description tells Granite exactly what to do for this event.
+    - name: Auto-trigger Lightspeed playbook generation on ultra-high confidence
+      condition: event.confidence | float >= 0.95
+      action:
+        run_job_template:
+          name: lightspeed-generate-and-run
+          organization: "MEC Content Intelligence"
+          job_args:
+            extra_vars:
+              mec_site_id: "{{ event.mec_site_id }}"
+              content_id: "{{ event.content_id }}"
+              content_url: "{{ event.content_url }}"
+              predicted_viewers: "{{ event.predicted_viewers }}"
+              event_type: "{{ event.event_type }}"
+              event_start_utc: "{{ event.event_start_utc }}"
+              confidence: "{{ event.confidence }}"
+              incident_id: "eda-auto-{{ event.mec_site_id }}-{{ event.content_id }}"
+              lightspeed_mode: "auto"
+              generated_playbook_name: "eda-prefetch-abr"
+              generated_from_model: "granite-3-3-8b"
+              generated_playbook_yaml: |
+                - name: EDA auto-triggered MEC pre-positioning
+                  hosts: localhost
+                  tasks:
+                    - name: Pre-cache content at MEC site
+                      kubernetes.core.k8s:
+                        state: present
+                        definition:
+                          apiVersion: batch/v1
+                          kind: Job
+                          metadata:
+                            name: prefetch-{{ event.content_id | replace('/', '-') }}
+                            namespace: mec-content-ai
+                          spec:
+                            template:
+                              spec:
+                                containers:
+                                  - name: prefetch
+                                    image: curlimages/curl:latest
+                                    command: [sh, -c, "curl -L {{ event.content_url }} -o /cache/{{ event.content_id }}"]
+                                restartPolicy: Never
+              triggered_by: "eda-auto"
+
+    # ── Rule 2: Log ultra-high confidence events for audit ─────────────────────
+    - name: Log auto-triggered events
+      condition: event.confidence | float >= 0.95
+      action:
+        print_event:
+          pretty: true
