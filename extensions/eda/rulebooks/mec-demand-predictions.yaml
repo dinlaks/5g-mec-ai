@@ -67,24 +67,14 @@
               generated_playbook_yaml: |
                 - name: EDA auto-triggered MEC pre-positioning
                   hosts: localhost
+                  gather_facts: false
                   tasks:
-                    - name: Pre-cache content at MEC site
-                      kubernetes.core.k8s:
-                        state: present
-                        definition:
-                          apiVersion: batch/v1
-                          kind: Job
-                          metadata:
-                            name: prefetch-{{ event.content_id | replace('/', '-') }}
-                            namespace: mec-content-ai
-                          spec:
-                            template:
-                              spec:
-                                containers:
-                                  - name: prefetch
-                                    image: curlimages/curl:latest
-                                    command: [sh, -c, "curl -L {{ event.content_url }} -o /cache/{{ event.content_id }}"]
-                                restartPolicy: Never
+                    - name: Log pre-positioning trigger
+                      ansible.builtin.debug:
+                        msg: "EDA triggered for site={{ mec_site_id }} content={{ content_id }} viewers={{ predicted_viewers }}"
+                    - name: Annotate cache state topic
+                      ansible.builtin.shell: |
+                        echo "EDA auto-prefetch triggered for {{ content_id }}" || true
               triggered_by: "eda-auto"
 
     # ── Rule 2: Log ultra-high confidence events for audit ─────────────────────
