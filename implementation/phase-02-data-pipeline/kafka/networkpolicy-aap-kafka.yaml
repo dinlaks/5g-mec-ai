@@ -1,0 +1,24 @@
+# NetworkPolicy: allow AAP namespace to reach Kafka in mec-ai-data
+# Required for EDA activation to consume from demand.predictions topic.
+# EDA pod runs in 'aap' namespace and needs port 9092 (PLAINTEXT).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-aap-to-kafka
+  namespace: mec-ai-data
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/cluster: kafka-cluster
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: aap
+      ports:
+        - protocol: TCP
+          port: 9092
+        - protocol: TCP
+          port: 9093
+  policyTypes:
+    - Ingress

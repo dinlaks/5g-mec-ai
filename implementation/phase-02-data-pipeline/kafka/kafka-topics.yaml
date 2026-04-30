@@ -128,7 +128,7 @@ spec:
   config:
     retention.ms: "3600000"       # 1 hour — agent must act within the window
     cleanup.policy: delete
-    compression.type: snappy
+    compression.type: gzip
 ---
 # Topic 7: Agent decisions (actions taken by near-edge LangGraph agent)
 # Producer: Near Edge aap_executor_node

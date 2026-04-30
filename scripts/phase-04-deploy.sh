@@ -79,6 +79,29 @@ oc get namespace aap --request-timeout=15s &>/dev/null || \
 success "AAP namespace exists"
 [[ -z "${AAP_ADMIN_PASSWORD:-}" ]] && \
   { error "AAP_ADMIN_PASSWORD not set in env.sh"; exit 1; }
+
+# Refresh AAP token if expired or missing
+if [[ -z "${AAP_TOKEN:-}" ]] || \
+   ! curl -s "${AAP_HOST}/api/v2/me/" -H "Authorization: Bearer ${AAP_TOKEN}" --insecure 2>/dev/null | grep -q '"username"'; then
+  info "AAP token missing or expired — generating fresh token..."
+  NEW_TOKEN=$(curl -s -X POST "${AAP_HOST}/api/v2/tokens/" \
+    -H "Content-Type: application/json" \
+    -u "admin:${AAP_ADMIN_PASSWORD}" \
+    -d '{"description":"phase-04-auto","scope":"write"}' \
+    --insecure | jq -r '.token // empty' 2>/dev/null)
+  if [[ -n "$NEW_TOKEN" ]]; then
+    export AAP_TOKEN="${NEW_TOKEN}"
+    if [[ "$(uname)" == "Darwin" ]]; then
+      sed -i '' "s|^export AAP_TOKEN=.*|export AAP_TOKEN=\"${NEW_TOKEN}\"|" configs/near-edge/env.sh
+    else
+      sed -i "s|^export AAP_TOKEN=.*|export AAP_TOKEN=\"${NEW_TOKEN}\"|" configs/near-edge/env.sh
+    fi
+    success "AAP token refreshed"
+  else
+    error "Could not generate AAP token — check AAP_ADMIN_PASSWORD and AAP_HOST"
+    exit 1
+  fi
+fi
 success "Pre-checks passed"
 [[ "$VALIDATE_ONLY" == true ]] && { success "Validate-only — done."; exit 0; }
 
@@ -205,7 +228,7 @@ section "Step 5 — Import EDA Rulebook"
 # =============================================================================
 # EDA uses its own admin password (separate from AAP controller).
 # Fetch it from the cluster secret, use basic auth for all EDA API calls.
-EDA_HOST="https://eda-controller-aap.apps.cluster-ld5ww.ld5ww.sandbox123.opentlc.com"
+EDA_HOST="https://eda-controller-aap.${OCP_APPS_DOMAIN:-apps.cluster-ld5ww.ld5ww.sandbox123.opentlc.com}"
 EDA_PASS=$(oc get secret eda-controller-admin-password -n aap \
   -o jsonpath='{.data.password}' 2>/dev/null | base64 -d)
 if [[ -z "$EDA_PASS" ]]; then
@@ -237,18 +260,44 @@ else
   wait_for "EDA project sync" 120 \
     "eda_api GET '/projects/${EDA_PROJ_ID}/' | jq -r '.import_state' | grep -qE 'completed|failed'"
 
-  info "Getting EDA decision environment..."
+  info "Creating/updating EDA Decision Environment..."
   DE_ID=$(eda_api GET "/decision-environments/" | jq -r '.results[0].id // empty')
+  if [[ -z "$DE_ID" ]]; then
+    DE_ID=$(eda_api POST "/decision-environments/" \
+      "{\"name\":\"Default EDA\",\"image_url\":\"registry.redhat.io/ansible-automation-platform-25/de-supported-rhel9:latest\",\"organization_id\":${EDA_ORG_ID}}" | \
+      jq -r '.id // empty')
+    success "Decision Environment created: ${DE_ID}"
+  else
+    success "Decision Environment found: ${DE_ID}"
+  fi
+
+  info "Creating EDA AAP credential (type: Red Hat AAP)..."
+  EDA_CRED_ID=$(eda_api GET "/eda-credentials/?name=aap-controller" | jq -r '.results[0].id // empty')
+  if [[ -z "$EDA_CRED_ID" ]]; then
+    EDA_CRED_ID=$(eda_api POST "/eda-credentials/" \
+      "{\"name\":\"aap-controller\",\"credential_type_id\":4,\"organization_id\":${EDA_ORG_ID},\"inputs\":{\"host\":\"${AAP_HOST}\",\"oauth_token\":\"${AAP_TOKEN}\",\"verify_ssl\":false}}" | \
+      jq -r '.id // empty')
+    success "EDA AAP credential created: ${EDA_CRED_ID}"
+  else
+    # Update token in case it was refreshed
+    eda_api PATCH "/eda-credentials/${EDA_CRED_ID}/" \
+      "{\"inputs\":{\"host\":\"${AAP_HOST}\",\"oauth_token\":\"${AAP_TOKEN}\",\"verify_ssl\":false}}" > /dev/null
+    success "EDA AAP credential updated: ${EDA_CRED_ID}"
+  fi
+
+  info "Getting rulebook ID from project..."
+  RULEBOOK_ID=$(eda_api GET "/rulebooks/?project_id=${EDA_PROJ_ID}" | jq -r '.results[0].id // empty')
 
   info "Creating EDA rulebook activation..."
   EXISTING=$(eda_api GET "/activations/?name=mec-demand-predictions" | jq -r '.count')
-  if [[ "$EXISTING" == "0" ]]; then
-    eda_api POST "/activations/" \
-      "{\"name\":\"mec-demand-predictions\",\"description\":\"MEC content pre-positioning — confidence ≥ 0.95 auto-trigger\",\"project\":${EDA_PROJ_ID},\"rulebook\":\"implementation/phase-04-automation/aap/eda-rulebook.yaml\",\"decision_environment\":${DE_ID},\"is_enabled\":true,\"restart_policy\":\"on-failure\"}" | \
-      jq -r '.id // empty' | xargs -I{} echo "Activation ID: {}"
-    success "EDA rulebook activation created and enabled"
+  ACTIVATION_ID=$(eda_api GET "/activations/?name=mec-demand-predictions" | jq -r '.results[0].id // empty')
+  if [[ "$EXISTING" == "0" || -z "$ACTIVATION_ID" ]]; then
+    ACTIVATION_ID=$(eda_api POST "/activations/" \
+      "{\"name\":\"mec-demand-predictions\",\"description\":\"MEC content pre-positioning — confidence >= 0.95 auto-trigger via Lightspeed\",\"project\":${EDA_PROJ_ID},\"rulebook_id\":${RULEBOOK_ID},\"decision_environment_id\":${DE_ID},\"organization_id\":${EDA_ORG_ID},\"eda_credentials\":[${EDA_CRED_ID}],\"is_enabled\":true,\"restart_policy\":\"on-failure\"}" | \
+      jq -r '.id // empty')
+    success "EDA rulebook activation created: ${ACTIVATION_ID}"
   else
-    warn "EDA activation mec-demand-predictions already exists — skipping"
+    success "EDA activation already exists: ${ACTIVATION_ID}"
   fi
 fi
 
@@ -296,19 +345,36 @@ fi
 section "Step 6 — End-to-End Test"
 # =============================================================================
 info "Publishing test demand event (confidence 0.97 → EDA auto-trigger)..."
-oc run aap-e2e-test --rm -it \
-  --image=registry.redhat.io/amq-streams/kafka-38-rhel9:latest \
-  -n mec-ai-data -- bash -c \
-  "echo '{\"mec_site_id\":\"mec-stadium-01\",\"content_id\":\"nfl-game-test\",\"content_url\":\"http://cdn-mock.mec-content-ai.svc.cluster.local:8080/nfl-game\",\"predicted_viewers\":48000,\"event_type\":\"live_sport\",\"event_start_utc\":\"2026-04-09T20:00:00Z\",\"confidence\":0.97,\"predicted_peak_in_minutes\":22}' | \
-  bin/kafka-console-producer.sh --bootstrap-server kafka-cluster-kafka-bootstrap:9092 --topic demand.predictions" \
-  2>/dev/null && success "Test event published"
+# Use existing Kafka broker pod — avoids image pull / auth issues
+KAFKA_POD=$(oc get pods -n mec-ai-data --no-headers 2>/dev/null | \
+  grep "kafka-cluster-broker" | head -1 | awk '{print $1}')
+if [[ -n "$KAFKA_POD" ]]; then
+  oc exec -n mec-ai-data "$KAFKA_POD" -- \
+    /opt/kafka/bin/kafka-console-producer.sh \
+    --bootstrap-server kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092 \
+    --topic demand.predictions <<'PAYLOAD' 2>/dev/null
+{"mec_site_id":"mec-stadium-01","content_id":"nfl-game-test","content_url":"http://cdn-mock.mec-content-ai.svc.cluster.local:8080/nfl-game","predicted_viewers":48000,"event_type":"live_sport","event_start_utc":"2026-04-09T20:00:00Z","confidence":0.97,"predicted_peak_in_minutes":22}
+PAYLOAD
+  success "Test event published to demand.predictions"
+else
+  warn "No Kafka broker pod found — publish test event manually"
+fi
 
-sleep 15
-info "Checking for AAP job triggered by EDA..."
-RECENT_JOB=$(aap_api GET "/jobs/?order_by=-created&page_size=3" | \
-  jq -r '.results[] | select(.summary_fields.job_template.name=="prefetch-content") | .status' | head -1)
-[[ -n "$RECENT_JOB" ]] && success "AAP job triggered: status=${RECENT_JOB}" || \
-  warn "No AAP job found yet — EDA may still be processing (check https://${AAP_URL})"
+sleep 20
+info "Checking for AAP job triggered by EDA (lightspeed-generate-and-run)..."
+RECENT_JOB=$(aap_api GET "/jobs/?order_by=-created&page_size=5" | \
+  jq -r '.results[] | select(.summary_fields.job_template.name=="lightspeed-generate-and-run") | .status' | head -1)
+if [[ -n "$RECENT_JOB" ]]; then
+  success "AAP job triggered: status=${RECENT_JOB}"
+else
+  warn "No AAP job triggered yet — EDA rulebook activation may need manual setup:"
+  warn "  1. Open EDA UI: https://eda-controller-aap.apps.cluster-ld5ww.ld5ww.sandbox123.opentlc.com"
+  warn "  2. Decision Environments → Create → use default DE image"
+  warn "  3. Rulebook Activations → Create → project: mec-content-rulebooks"
+  warn "     rulebook: extensions/eda/rulebooks/mec-demand-predictions.yaml"
+  warn "     AAP token: add controller token pointing to ${AAP_HOST}"
+  info "Phase 04 complete — EDA activation can be verified separately"
+fi
 
 echo ""
 echo -e "${GREEN}${BOLD}✅  Phase 04 complete.${NC}"

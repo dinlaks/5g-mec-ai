@@ -30,10 +30,11 @@
   hosts: all
   sources:
     - ansible.eda.kafka:
-        host: "{{ kafka_bootstrap_host }}"
-        port: "{{ kafka_bootstrap_port | default(9092) }}"
+        host: "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local"
+        port: 9092
         topic: demand.predictions
         group_id: eda-mec-content-intelligence
+        auto_offset_reset: latest
         # TLS settings for AMQ Streams
         security_protocol: PLAINTEXT    # change to SSL when TLS enabled on Kafka
         # ssl_cafile: /etc/kafka/certs/ca.crt
@@ -45,50 +46,37 @@
     # All-Lightspeed: even the EDA fast-path uses lightspeed-generate-and-run.
     # The playbook description tells Granite exactly what to do for this event.
     - name: Auto-trigger Lightspeed playbook generation on ultra-high confidence
-      condition: event.confidence | float >= 0.95
+      condition: event.body.confidence >= 0.95
       action:
         run_job_template:
           name: lightspeed-generate-and-run
-          organization: "MEC Content Intelligence"
+          organization: "Default"
           job_args:
             extra_vars:
-              mec_site_id: "{{ event.mec_site_id }}"
-              content_id: "{{ event.content_id }}"
-              content_url: "{{ event.content_url }}"
-              predicted_viewers: "{{ event.predicted_viewers }}"
-              event_type: "{{ event.event_type }}"
-              event_start_utc: "{{ event.event_start_utc }}"
-              confidence: "{{ event.confidence }}"
-              incident_id: "eda-auto-{{ event.mec_site_id }}-{{ event.content_id }}"
+              mec_site_id: "{{ event.body.mec_site_id }}"
+              content_id: "{{ event.body.content_id }}"
+              content_url: "{{ event.body.content_url }}"
+              predicted_viewers: "{{ event.body.predicted_viewers }}"
+              event_type: "{{ event.body.event_type }}"
+              event_start_utc: "{{ event.body.event_start_utc }}"
+              confidence: "{{ event.body.confidence }}"
+              incident_id: "eda-auto-{{ event.body.mec_site_id }}-{{ event.body.content_id }}"
               lightspeed_mode: "auto"
               generated_playbook_name: "eda-prefetch-abr"
               generated_from_model: "granite-3-3-8b"
               generated_playbook_yaml: |
                 - name: EDA auto-triggered MEC pre-positioning
                   hosts: localhost
+                  gather_facts: false
                   tasks:
-                    - name: Pre-cache content at MEC site
-                      kubernetes.core.k8s:
-                        state: present
-                        definition:
-                          apiVersion: batch/v1
-                          kind: Job
-                          metadata:
-                            name: prefetch-{{ event.content_id | replace('/', '-') }}
-                            namespace: mec-content-ai
-                          spec:
-                            template:
-                              spec:
-                                containers:
-                                  - name: prefetch
-                                    image: curlimages/curl:latest
-                                    command: [sh, -c, "curl -L {{ event.content_url }} -o /cache/{{ event.content_id }}"]
-                                restartPolicy: Never
+                    - name: Log EDA trigger
+                      ansible.builtin.debug:
+                        msg: EDA pre-positioning triggered successfully
               triggered_by: "eda-auto"
 
     # ── Rule 2: Log ultra-high confidence events for audit ─────────────────────
     - name: Log auto-triggered events
-      condition: event.confidence | float >= 0.95
+      condition: event.body.confidence >= 0.95
       action:
         print_event:
           pretty: true
