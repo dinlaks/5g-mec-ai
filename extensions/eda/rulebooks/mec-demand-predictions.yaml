@@ -69,12 +69,9 @@
                   hosts: localhost
                   gather_facts: false
                   tasks:
-                    - name: Log pre-positioning trigger
+                    - name: Log EDA trigger
                       ansible.builtin.debug:
-                        msg: "EDA triggered for site={{ mec_site_id }} content={{ content_id }} viewers={{ predicted_viewers }}"
-                    - name: Annotate cache state topic
-                      ansible.builtin.shell: |
-                        echo "EDA auto-prefetch triggered for {{ content_id }}" || true
+                        msg: EDA pre-positioning triggered successfully
               triggered_by: "eda-auto"
 
     # ── Rule 2: Log ultra-high confidence events for audit ─────────────────────
