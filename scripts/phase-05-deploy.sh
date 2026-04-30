@@ -40,7 +40,35 @@ if ! oc whoami &>/dev/null; then error "Not logged in."; exit 1; fi
 oc get pods -n mec-ai-data -l app=minio --no-headers 2>/dev/null | grep -q Running || \
   { error "MinIO not running — run phase-02 first."; exit 1; }
 [[ -z "${GIT_REPO_URL:-}" ]] && { error "GIT_REPO_URL not set in env.sh"; exit 1; }
-[[ -z "${SLACK_BOT_TOKEN:-}" ]] && warn "SLACK_BOT_TOKEN not set — mcp-slack will fail at runtime"
+
+# ── Langfuse keys check ────────────────────────────────────────────────────────
+if [[ -z "${LANGFUSE_PUBLIC_KEY:-}" || -z "${LANGFUSE_SECRET_KEY:-}" ]]; then
+  LANGFUSE_ROUTE=$(oc get route langfuse -n mec-ai-obs \
+    -o jsonpath='{.spec.host}' 2>/dev/null)
+  error "Langfuse API keys not set in env.sh. Generate them first:"
+  error "  1. Open: https://${LANGFUSE_ROUTE}"
+  error "  2. Settings → API Keys → Create new key"
+  error "  3. Add to env.sh: LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY"
+  error "  4. source configs/near-edge/env.sh"
+  exit 1
+fi
+success "Langfuse API keys: set"
+
+# ── Slack credentials check ───────────────────────────────────────────────────
+if [[ -z "${SLACK_BOT_TOKEN:-}" ]]; then
+  warn "SLACK_BOT_TOKEN not set — mcp-slack human-in-loop approvals will not work"
+  warn "To set up Slack:"
+  warn "  1. Go to https://api.slack.com/apps → Create New App → From scratch"
+  warn "  2. Select your workspace → OAuth & Permissions → Add scopes:"
+  warn "     chat:write  chat:write.public  channels:read  im:write"
+  warn "  3. Install to Workspace → copy Bot OAuth Token (xoxb-...)"
+  warn "  4. Basic Information → copy Signing Secret"
+  warn "  5. Incoming Webhooks → enable → Add Webhook → copy URL"
+  warn "  6. Add to env.sh: SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, SLACK_WEBHOOK_URL"
+  warn "  Continuing without Slack — agent will use EdgeStream IQ dashboard for approvals"
+else
+  success "Slack credentials: set"
+fi
 success "Pre-checks passed"
 [[ "$VALIDATE_ONLY" == true ]] && { success "Validate-only — done."; exit 0; }
 

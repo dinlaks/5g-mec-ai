@@ -118,16 +118,24 @@ success "Langfuse ready: https://${LANGFUSE_URL}"
 # =============================================================================
 section "Step 6 — ⏸ MANUAL: Generate Langfuse API Keys"
 # =============================================================================
-pause_for_human "Open Langfuse UI in your browser:
-  URL: https://${LANGFUSE_URL}
-  1. Sign up → create org: mec-content-ai → project: 5g-mec-intelligence
+LANGFUSE_ROUTE=$(oc get route langfuse -n mec-ai-obs \
+  -o jsonpath='{.spec.host}' 2>/dev/null || echo "langfuse-mec-ai-obs.${APPS_DOMAIN}")
+pause_for_human "Open Langfuse UI and generate API keys:
+
+  URL: https://${LANGFUSE_ROUTE}
+
+  1. Sign up (first user = admin) → create org: mec-content-ai
+     → create project: 5g-mec-intelligence
   2. Settings → API Keys → Create new API key
-  3. Copy BOTH keys (secret shown once only)
+  3. Copy BOTH keys (secret key shown only once!)
   4. Add to configs/near-edge/env.sh:
-       export LANGFUSE_PUBLIC_KEY='pk-lf-...'
-       export LANGFUSE_SECRET_KEY='sk-lf-...'
-       export LANGFUSE_HOST='https://${LANGFUSE_URL}'
-  5. Run: source configs/near-edge/env.sh"
+       export LANGFUSE_PUBLIC_KEY='pk-lf-<paste>'
+       export LANGFUSE_SECRET_KEY='sk-lf-<paste>'
+       export LANGFUSE_HOST='https://${LANGFUSE_ROUTE}'
+  5. Run: source configs/near-edge/env.sh
+
+  ⚠️  These keys are required by Phase 05 (LangGraph agent observability).
+      The secret key is shown only once — save it immediately."
 
 # Apply Phase 05 secrets now that Langfuse keys are available
 ./scripts/apply-secrets.sh --phase 05
