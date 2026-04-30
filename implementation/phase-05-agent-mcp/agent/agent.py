@@ -51,8 +51,8 @@ log = logging.getLogger("content-intelligence-agent")
 
 # ── Config from environment ────────────────────────────────────────────────────
 KAFKA_BOOTSTRAP    = os.getenv("KAFKA_BOOTSTRAP", "kafka-cluster-kafka-bootstrap.mec-ai-data.svc.cluster.local:9092")
-LLAMASTACK_URL     = os.getenv("LLAMASTACK_URL", "http://llamastack.mec-content-ai.svc.cluster.local:5001")
-MODEL_ID           = os.getenv("MODEL_ID", "meta-llama/Llama-3.1-8B-Instruct")
+LLAMASTACK_URL     = os.getenv("LLAMASTACK_URL", "http://mec-llamastack.mec-content-ai.svc.cluster.local:8321")
+MODEL_ID           = os.getenv("MODEL_ID", "granite-3-3-8b")
 LANGFUSE_HOST      = os.getenv("LANGFUSE_HOST", "https://langfuse.apps.cluster.local")
 LANGFUSE_PUBLIC_KEY= os.getenv("LANGFUSE_PUBLIC_KEY", "")
 LANGFUSE_SECRET_KEY= os.getenv("LANGFUSE_SECRET_KEY", "")
@@ -66,7 +66,7 @@ MCP_KUBEFLOW       = os.getenv("MCP_KUBEFLOW_URL", "http://mcp-kubeflow:8000/mcp
 MCP_OPENSHIFT      = os.getenv("MCP_OPENSHIFT_URL", "http://mcp-openshift:8000/mcp")
 
 SLACK_OPS_CHANNEL  = os.getenv("SLACK_OPS_CHANNEL", "#mec-ai-ops")
-AGENT_API_URL      = os.getenv("AGENT_API_URL", "https://content-intelligence-agent.mec-content-ai.svc.cluster.local")
+AGENT_API_URL      = os.getenv("AGENT_API_URL", "http://content-intelligence-agent.mec-content-ai.svc.cluster.local:8000")
 
 # ── Clients ────────────────────────────────────────────────────────────────────
 langfuse = Langfuse(
